@@ -1,0 +1,764 @@
+@host = http://localhost:5001
+@baseUrl = {{host}}/api/v1
+@healthUrl = {{host}}/health
+
+# =========================
+# STATIC CONFIG
+# =========================
+@superAdminEmail = superadmin@example.com
+@superAdminPassword = Admin@123
+
+@adminEmail = admin@example.com
+@adminPassword = Admin@123
+
+@teacherEmail = teacher1@example.com
+@teacherPassword = Teacher@123
+
+@aiApiKey = smart_attendance_ai_key_987654321
+
+# =========================
+# HEALTH
+# =========================
+
+### Health Check
+GET {{healthUrl}}
+
+# =========================
+# AUTH
+# =========================
+
+### Register Super Admin (use only if bootstrap register is allowed)
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "fullName": "Super Admin",
+  "email": "{{superAdminEmail}}",
+  "password": "{{superAdminPassword}}",
+  "role": "super_admin"
+}
+
+### Login Super Admin
+# @name loginSuperAdmin
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "{{superAdminEmail}}",
+  "password": "{{superAdminPassword}}"
+}
+
+> {%
+const body = response.body || {};
+const data = body.data || body;
+if (data.token) client.global.set("token", data.token);
+if (data.user && data.user._id) client.global.set("superAdminId", data.user._id);
+%}
+
+### Current User Profile
+GET {{baseUrl}}/auth/me
+Authorization: Bearer {{token}}
+
+### Login Wrong Password (negative test)
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "{{superAdminEmail}}",
+  "password": "WrongPassword123"
+}
+
+### Protected Route Without Token (negative test)
+GET {{baseUrl}}/auth/me
+
+# =========================
+# USERS
+# =========================
+
+### Create Admin User
+# @name createAdminUser
+POST {{baseUrl}}/users
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "fullName": "Main Admin",
+  "email": "{{adminEmail}}",
+  "password": "{{adminPassword}}",
+  "role": "admin"
+}
+
+> {%
+const body = response.body || {};
+const data = body.data || body;
+if (data._id) client.global.set("adminId", data._id);
+%}
+
+### Create Teacher User
+# @name createTeacherUser
+POST {{baseUrl}}/users
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "fullName": "Teacher One",
+  "email": "{{teacherEmail}}",
+  "password": "{{teacherPassword}}",
+  "role": "teacher"
+}
+
+> {%
+const body = response.body || {};
+const data = body.data || body;
+if (data._id) client.global.set("teacherUserId", data._id);
+%}
+
+### Get Users List
+GET {{baseUrl}}/users
+Authorization: Bearer {{token}}
+
+# =========================
+# CLASS GROUPS
+# =========================
+
+### Create Class Group
+# @name createClassGroup
+POST {{baseUrl}}/class-groups
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "BCA 3rd Year A",
+  "code": "BCA3A",
+  "department": "Computer Science",
+  "semester": 6,
+  "section": "A",
+  "academicYear": "2025-2026",
+  "isActive": true
+}
+
+> {%
+const body = response.body || {};
+const data = body.data || body;
+if (data._id) client.global.set("classGroupId", data._id);
+%}
+
+### Get Class Groups
+GET {{baseUrl}}/class-groups
+Authorization: Bearer {{token}}
+
+### Get Class Group By Id
+GET {{baseUrl}}/class-groups/{{classGroupId}}
+Authorization: Bearer {{token}}
+
+### Update Class Group
+PATCH {{baseUrl}}/class-groups/{{classGroupId}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "section": "A1"
+}
+
+### Duplicate Class Group Code (negative test)
+POST {{baseUrl}}/class-groups
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "Duplicate BCA 3rd Year A",
+  "code": "BCA3A",
+  "department": "Computer Science",
+  "semester": 6,
+  "section": "B",
+  "academicYear": "2025-2026",
+  "isActive": true
+}
+
+# =========================
+# CLASSROOMS
+# =========================
+
+### Create Classroom
+# @name createClassroom
+POST {{baseUrl}}/classrooms
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "Smart Room 101",
+  "code": "SR101",
+  "building": "Main Block",
+  "floor": 1,
+  "capacity": 60,
+  "cameraIds": ["cam-01"],
+  "isActive": true
+}
+
+> {%
+const body = response.body || {};
+const data = body.data || body;
+if (data._id) client.global.set("classroomId", data._id);
+%}
+
+### Get Classrooms
+GET {{baseUrl}}/classrooms
+Authorization: Bearer {{token}}
+
+### Get Classroom By Id
+GET {{baseUrl}}/classrooms/{{classroomId}}
+Authorization: Bearer {{token}}
+
+### Update Classroom
+PATCH {{baseUrl}}/classrooms/{{classroomId}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "capacity": 70,
+  "cameraIds": ["cam-01", "cam-02"]
+}
+
+# =========================
+# SUBJECTS
+# =========================
+
+### Create Subject
+# @name createSubject
+POST {{baseUrl}}/subjects
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "Artificial Intelligence",
+  "code": "AI601",
+  "description": "AI fundamentals and practical applications",
+  "creditHours": 4,
+  "classGroupIds": ["{{classGroupId}}"],
+  "isActive": true
+}
+
+> {%
+const body = response.body || {};
+const data = body.data || body;
+if (data._id) client.global.set("subjectId", data._id);
+%}
+
+### Get Subjects
+GET {{baseUrl}}/subjects
+Authorization: Bearer {{token}}
+
+### Get Subject By Id
+GET {{baseUrl}}/subjects/{{subjectId}}
+Authorization: Bearer {{token}}
+
+### Update Subject
+PATCH {{baseUrl}}/subjects/{{subjectId}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "creditHours": 5
+}
+
+# =========================
+# TEACHERS
+# =========================
+
+### Create Teacher Profile
+# @name createTeacherProfile
+POST {{baseUrl}}/teachers
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "userId": "{{teacherUserId}}",
+  "employeeId": "EMP-1001",
+  "department": "Computer Science",
+  "designation": "Assistant Professor",
+  "subjectsTaught": ["{{subjectId}}"],
+  "assignedClassGroups": ["{{classGroupId}}"]
+}
+
+> {%
+const body = response.body || {};
+const data = body.data || body;
+if (data._id) client.global.set("teacherProfileId", data._id);
+%}
+
+### Get Teachers
+GET {{baseUrl}}/teachers
+Authorization: Bearer {{token}}
+
+### Get Teacher By Id
+GET {{baseUrl}}/teachers/{{teacherProfileId}}
+Authorization: Bearer {{token}}
+
+### Update Teacher Profile
+PATCH {{baseUrl}}/teachers/{{teacherProfileId}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "designation": "Associate Professor"
+}
+
+# =========================
+# STUDENTS
+# =========================
+
+### Create Student 1
+# @name createStudent1
+POST {{baseUrl}}/students
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "firstName": "Amit",
+  "lastName": "Kumar",
+  "rollNumber": "BCA3A001",
+  "email": "amit@example.com",
+  "phone": "9000000001",
+  "gender": "male",
+  "classGroupId": "{{classGroupId}}",
+  "status": "active"
+}
+
+> {%
+const body = response.body || {};
+const data = body.data || body;
+if (data._id) client.global.set("studentId1", data._id);
+%}
+
+### Create Student 2
+# @name createStudent2
+POST {{baseUrl}}/students
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "firstName": "Neha",
+  "lastName": "Singh",
+  "rollNumber": "BCA3A002",
+  "email": "neha@example.com",
+  "phone": "9000000002",
+  "gender": "female",
+  "classGroupId": "{{classGroupId}}",
+  "status": "active"
+}
+
+> {%
+const body = response.body || {};
+const data = body.data || body;
+if (data._id) client.global.set("studentId2", data._id);
+%}
+
+### Create Student 3
+# @name createStudent3
+POST {{baseUrl}}/students
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "firstName": "Rahul",
+  "lastName": "Verma",
+  "rollNumber": "BCA3A003",
+  "email": "rahul@example.com",
+  "phone": "9000000003",
+  "gender": "male",
+  "classGroupId": "{{classGroupId}}",
+  "status": "active"
+}
+
+> {%
+const body = response.body || {};
+const data = body.data || body;
+if (data._id) client.global.set("studentId3", data._id);
+%}
+
+### Get Students
+GET {{baseUrl}}/students
+Authorization: Bearer {{token}}
+
+### Get Student By Id
+GET {{baseUrl}}/students/{{studentId1}}
+Authorization: Bearer {{token}}
+
+### Update Student
+PATCH {{baseUrl}}/students/{{studentId1}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "phone": "9999999991"
+}
+
+### Duplicate Roll Number (negative test)
+POST {{baseUrl}}/students
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "firstName": "Duplicate",
+  "lastName": "Student",
+  "rollNumber": "BCA3A001",
+  "classGroupId": "{{classGroupId}}",
+  "status": "active"
+}
+
+### Invalid Student Create (negative test)
+POST {{baseUrl}}/students
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "firstName": "Bad",
+  "lastName": "Data",
+  "rollNumber": "",
+  "classGroupId": "invalid-id",
+  "status": "active"
+}
+
+# =========================
+# SESSIONS
+# =========================
+
+### Create Session
+# @name createSession
+POST {{baseUrl}}/sessions
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "title": "AI Lecture 1",
+  "classGroupId": "{{classGroupId}}",
+  "subjectId": "{{subjectId}}",
+  "teacherId": "{{teacherProfileId}}",
+  "classroomId": "{{classroomId}}",
+  "cameraIds": ["cam-01"],
+  "scheduledDate": "2026-03-12",
+  "scheduledStartTime": "2026-03-12T10:00:00.000Z",
+  "scheduledEndTime": "2026-03-12T11:00:00.000Z",
+  "graceMinutesForLate": 10,
+  "minimumPresenceMinutes": 30,
+  "minimumPresencePercentage": 60,
+  "status": "created"
+}
+
+> {%
+const body = response.body || {};
+const data = body.data || body;
+if (data._id) client.global.set("sessionId", data._id);
+%}
+
+### Get Sessions
+GET {{baseUrl}}/sessions
+Authorization: Bearer {{token}}
+
+### Get Session By Id
+GET {{baseUrl}}/sessions/{{sessionId}}
+Authorization: Bearer {{token}}
+
+### Update Session
+PATCH {{baseUrl}}/sessions/{{sessionId}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "notes": "Updated before starting session"
+}
+
+### Start Session
+POST {{baseUrl}}/sessions/{{sessionId}}/start
+Authorization: Bearer {{token}}
+
+### Complete Session
+POST {{baseUrl}}/sessions/{{sessionId}}/complete
+Authorization: Bearer {{token}}
+
+### Archive Session
+POST {{baseUrl}}/sessions/{{sessionId}}/archive
+Authorization: Bearer {{token}}
+
+# =========================
+# AI RECOGNITION EVENTS
+# =========================
+
+### Send Known Recognition Events - Batch 1
+POST {{baseUrl}}/ai/recognition-events
+x-ai-api-key: {{aiApiKey}}
+Content-Type: application/json
+
+{
+  "sessionId": "{{sessionId}}",
+  "cameraId": "cam-01",
+  "events": [
+    {
+      "studentId": "{{studentId1}}",
+      "isUnknown": false,
+      "confidence": 0.96,
+      "timestamp": "2026-03-12T10:05:00.000Z",
+      "boundingBox": { "x": 100, "y": 120, "w": 80, "h": 80 }
+    },
+    {
+      "studentId": "{{studentId2}}",
+      "isUnknown": false,
+      "confidence": 0.93,
+      "timestamp": "2026-03-12T10:06:00.000Z",
+      "boundingBox": { "x": 140, "y": 120, "w": 80, "h": 80 }
+    }
+  ]
+}
+
+### Send Known Recognition Events - Batch 2
+POST {{baseUrl}}/ai/recognition-events
+x-ai-api-key: {{aiApiKey}}
+Content-Type: application/json
+
+{
+  "sessionId": "{{sessionId}}",
+  "cameraId": "cam-01",
+  "events": [
+    {
+      "studentId": "{{studentId1}}",
+      "isUnknown": false,
+      "confidence": 0.95,
+      "timestamp": "2026-03-12T10:20:00.000Z",
+      "boundingBox": { "x": 100, "y": 120, "w": 80, "h": 80 }
+    },
+    {
+      "studentId": "{{studentId1}}",
+      "isUnknown": false,
+      "confidence": 0.94,
+      "timestamp": "2026-03-12T10:40:00.000Z",
+      "boundingBox": { "x": 100, "y": 120, "w": 80, "h": 80 }
+    },
+    {
+      "studentId": "{{studentId2}}",
+      "isUnknown": false,
+      "confidence": 0.91,
+      "timestamp": "2026-03-12T10:50:00.000Z",
+      "boundingBox": { "x": 140, "y": 120, "w": 80, "h": 80 }
+    }
+  ]
+}
+
+### Send Late Student Event
+POST {{baseUrl}}/ai/recognition-events
+x-ai-api-key: {{aiApiKey}}
+Content-Type: application/json
+
+{
+  "sessionId": "{{sessionId}}",
+  "cameraId": "cam-01",
+  "events": [
+    {
+      "studentId": "{{studentId3}}",
+      "isUnknown": false,
+      "confidence": 0.92,
+      "timestamp": "2026-03-12T10:18:00.000Z",
+      "boundingBox": { "x": 180, "y": 120, "w": 80, "h": 80 }
+    }
+  ]
+}
+
+### Send Unknown Face Event
+# @name createUnknownFace
+POST {{baseUrl}}/ai/recognition-events
+x-ai-api-key: {{aiApiKey}}
+Content-Type: application/json
+
+{
+  "sessionId": "{{sessionId}}",
+  "cameraId": "cam-01",
+  "events": [
+    {
+      "studentId": null,
+      "isUnknown": true,
+      "confidence": 0.24,
+      "timestamp": "2026-03-12T10:22:00.000Z",
+      "boundingBox": { "x": 210, "y": 120, "w": 80, "h": 80 }
+    }
+  ]
+}
+
+### AI Missing sessionId (negative test)
+POST {{baseUrl}}/ai/recognition-events
+x-ai-api-key: {{aiApiKey}}
+Content-Type: application/json
+
+{
+  "cameraId": "cam-01",
+  "events": []
+}
+
+### AI Bad Confidence (negative test)
+POST {{baseUrl}}/ai/recognition-events
+x-ai-api-key: {{aiApiKey}}
+Content-Type: application/json
+
+{
+  "sessionId": "{{sessionId}}",
+  "cameraId": "cam-01",
+  "events": [
+    {
+      "studentId": "{{studentId1}}",
+      "isUnknown": false,
+      "confidence": 1.7,
+      "timestamp": "2026-03-12T10:22:00.000Z"
+    }
+  ]
+}
+
+### AI Wrong API Key (negative test)
+POST {{baseUrl}}/ai/recognition-events
+x-ai-api-key: WRONG_KEY
+Content-Type: application/json
+
+{
+  "sessionId": "{{sessionId}}",
+  "cameraId": "cam-01",
+  "events": [
+    {
+      "studentId": "{{studentId1}}",
+      "isUnknown": false,
+      "confidence": 0.87,
+      "timestamp": "2026-03-12T10:25:00.000Z"
+    }
+  ]
+}
+
+# =========================
+# ALERTS
+# =========================
+
+### List Unknown Face Alerts
+# @name listUnknownAlerts
+GET {{baseUrl}}/alerts/unknown-faces
+Authorization: Bearer {{token}}
+
+> {%
+const body = response.body || {};
+const data = body.data || body;
+const items = data.items || data.alerts || data || [];
+if (Array.isArray(items) && items.length > 0 && items[0]._id) {
+  client.global.set("unknownAlertId", items[0]._id);
+}
+%}
+
+### Mark Unknown Face Alert Reviewed
+PATCH {{baseUrl}}/alerts/unknown-faces/{{unknownAlertId}}/reviewed
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "reviewed": true
+}
+
+# =========================
+# ATTENDANCE
+# =========================
+
+### Recalculate Attendance
+POST {{baseUrl}}/attendance/sessions/{{sessionId}}/recalculate
+Authorization: Bearer {{token}}
+
+### Get Session Attendance Records
+GET {{baseUrl}}/attendance/sessions/{{sessionId}}/records
+Authorization: Bearer {{token}}
+
+### Finalize Attendance
+POST {{baseUrl}}/attendance/sessions/{{sessionId}}/finalize
+Authorization: Bearer {{token}}
+
+### Get Student 1 Attendance History
+GET {{baseUrl}}/attendance/students/{{studentId1}}/history
+Authorization: Bearer {{token}}
+
+### Get Student 2 Attendance History
+GET {{baseUrl}}/attendance/students/{{studentId2}}/history
+Authorization: Bearer {{token}}
+
+### Get Student 3 Attendance History
+GET {{baseUrl}}/attendance/students/{{studentId3}}/history
+Authorization: Bearer {{token}}
+
+# =========================
+# SESSION SUMMARY / ANALYTICS
+# =========================
+
+### Get Session Summary
+GET {{baseUrl}}/attendance/sessions/{{sessionId}}/summary
+Authorization: Bearer {{token}}
+
+### Attendance Overview
+GET {{baseUrl}}/analytics/attendance-overview?from=2026-03-01&to=2026-03-31
+Authorization: Bearer {{token}}
+
+### Low Attendance Students
+GET {{baseUrl}}/analytics/low-attendance?threshold=75
+Authorization: Bearer {{token}}
+
+### Late Entries Report
+GET {{baseUrl}}/analytics/late-entries?from=2026-03-01&to=2026-03-31
+Authorization: Bearer {{token}}
+
+### Session Absentees
+GET {{baseUrl}}/analytics/session-absentees/{{sessionId}}
+Authorization: Bearer {{token}}
+
+### Class Group Summary
+GET {{baseUrl}}/attendance/class-groups/{{classGroupId}}/summary?from=2026-03-01&to=2026-03-31
+Authorization: Bearer {{token}}
+
+# =========================
+# SECURITY / NEGATIVE TESTS
+# =========================
+
+### Invalid Route
+GET {{baseUrl}}/this-route-does-not-exist
+Authorization: Bearer {{token}}
+
+### Invalid ObjectId Test - Student
+GET {{baseUrl}}/students/invalid-object-id
+Authorization: Bearer {{token}}
+
+### Invalid ObjectId Test - Session
+GET {{baseUrl}}/sessions/invalid-object-id
+Authorization: Bearer {{token}}
+
+### Access Protected Route Without Token
+GET {{baseUrl}}/students
+
+### Access Teacher/Admin Route With Wrong Token Format
+GET {{baseUrl}}/students
+Authorization: Bearer invalidtokenvalue
+
+# =========================
+# OPTIONAL QUICK END-TO-END ORDER
+# =========================
+# Run in this order:
+# 1. Health Check
+# 2. Login Super Admin
+# 3. Create Admin User
+# 4. Create Teacher User
+# 5. Create Class Group
+# 6. Create Classroom
+# 7. Create Subject
+# 8. Create Teacher Profile
+# 9. Create Student 1, 2, 3
+# 10. Create Session
+# 11. Start Session
+# 12. Send Known Recognition Events - Batch 1
+# 13. Send Known Recognition Events - Batch 2
+# 14. Send Late Student Event
+# 15. Send Unknown Face Event
+# 16. List Unknown Face Alerts
+# 17. Mark Unknown Face Alert Reviewed
+# 18. Recalculate Attendance
+# 19. Get Session Attendance Records
+# 20. Complete Session
+# 21. Finalize Attendance
+# 22. Get Session Summary
+# 23. Attendance Overview
+# 24. Student History / Reports

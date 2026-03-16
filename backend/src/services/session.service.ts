@@ -1,0 +1,640 @@
+import { FilterQuery } from 'mongoose';
+
+import { HTTP_STATUS } from '../constants/http';
+import {
+  ACTIVE_SESSION_STATUSES,
+  SessionStatus,
+} from '../constants/session';
+import { UserRole } from '../constants/roles';
+import ClassGroupModel from '../models/ClassGroup.model';
+import ClassroomModel from '../models/Classroom.model';
+import SessionModel, { Session } from '../models/Session.model';
+import SubjectModel from '../models/Subject.model';
+import TeacherProfileModel from '../models/TeacherProfile.model';
+import { AuthenticatedUser } from '../types/auth.types';
+import { PaginatedResult, RequestAuditContext } from '../types/common.types';
+import { AppError } from '../utils/AppError';
+import {
+  buildPaginationMeta,
+  getPaginationOptions,
+} from '../utils/pagination';
+import { auditService } from './audit.service';
+
+interface SessionListQuery {
+  page?: number;
+  limit?: number;
+  search?: string;
+  scheduledDate?: string;
+  teacherId?: string;
+  classGroupId?: string;
+  subjectId?: string;
+  status?: SessionStatus;
+}
+
+interface SessionPayload {
+  title?: string;
+  classGroupId?: string;
+  subjectId?: string;
+  teacherId?: string;
+  classroomId?: string;
+  cameraIds?: string[];
+  scheduledDate?: string;
+  scheduledStartTime?: string;
+  scheduledEndTime?: string;
+  graceMinutesForLate?: number;
+  minimumPresenceMinutes?: number;
+  minimumPresencePercentage?: number;
+  notes?: string | null;
+}
+
+interface SessionReferenceBundle {
+  classGroup: {
+    _id: unknown;
+    name: string;
+    code: string;
+    isActive: boolean;
+  };
+  subject: {
+    _id: unknown;
+    name: string;
+    code: string;
+    isActive: boolean;
+  };
+  teacherProfile: {
+    _id: unknown;
+  };
+  classroom: {
+    _id: unknown;
+    cameraIds: string[];
+    isActive: boolean;
+  };
+}
+
+const normalizeSessionPayload = (payload: SessionPayload) => {
+  return {
+    ...payload,
+    title: payload.title?.trim(),
+    notes:
+      payload.notes === undefined || payload.notes === null
+        ? payload.notes
+        : payload.notes.trim(),
+    scheduledStartTime: payload.scheduledStartTime?.trim(),
+    scheduledEndTime: payload.scheduledEndTime?.trim(),
+    cameraIds: payload.cameraIds
+      ? [...new Set(payload.cameraIds.map((cameraId) => cameraId.trim()))]
+      : undefined,
+  };
+};
+
+const getDateOnly = (dateValue: string): Date => {
+  return new Date(`${dateValue}T00:00:00.000Z`);
+};
+
+const getNextDateOnly = (dateValue: string): Date => {
+  const date = getDateOnly(dateValue);
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date;
+};
+
+const getTimeInMinutes = (timeValue: string): number => {
+  const [hours, minutes] = timeValue.split(':').map(Number);
+  return hours * 60 + minutes;
+};
+
+const getDatePortion = (dateValue: Date): string => {
+  return dateValue.toISOString().slice(0, 10);
+};
+
+const getScheduledDateTime = (scheduledDate: Date, timeValue: string): Date => {
+  return new Date(`${getDatePortion(scheduledDate)}T${timeValue}:00.000Z`);
+};
+
+const ensureValidScheduleWindow = (
+  scheduledStartTime: string,
+  scheduledEndTime: string,
+): void => {
+  if (getTimeInMinutes(scheduledEndTime) <= getTimeInMinutes(scheduledStartTime)) {
+    throw new AppError(
+      'Scheduled end time must be after scheduled start time.',
+      HTTP_STATUS.BAD_REQUEST,
+    );
+  }
+};
+
+const ensureThresholdsAreConsistent = (payload: {
+  minimumPresenceMinutes?: number;
+  minimumPresencePercentage?: number;
+}): void => {
+  if (
+    payload.minimumPresenceMinutes !== undefined &&
+    payload.minimumPresenceMinutes < 0
+  ) {
+    throw new AppError(
+      'Minimum presence minutes must be zero or greater.',
+      HTTP_STATUS.BAD_REQUEST,
+    );
+  }
+
+  if (
+    payload.minimumPresencePercentage !== undefined &&
+    (payload.minimumPresencePercentage < 0 ||
+      payload.minimumPresencePercentage > 100)
+  ) {
+    throw new AppError(
+      'Minimum presence percentage must be between 0 and 100.',
+      HTTP_STATUS.BAD_REQUEST,
+    );
+  }
+};
+
+const getSessionOrThrow = async (id: string) => {
+  const session = await SessionModel.findById(id);
+
+  if (!session) {
+    throw new AppError('Session not found.', HTTP_STATUS.NOT_FOUND);
+  }
+
+  return session;
+};
+
+const getReferenceBundle = async (payload: {
+  classGroupId: string;
+  subjectId: string;
+  teacherId: string;
+  classroomId: string;
+}): Promise<SessionReferenceBundle> => {
+  const classGroup = (await ClassGroupModel.findById(payload.classGroupId)
+    .select('_id name code isActive')
+    .lean()) as SessionReferenceBundle['classGroup'] | null;
+  const subject = (await SubjectModel.findById(payload.subjectId)
+    .select('_id name code isActive')
+    .lean()) as SessionReferenceBundle['subject'] | null;
+  const teacherProfile = (await TeacherProfileModel.findById(payload.teacherId)
+    .select('_id')
+    .lean()) as SessionReferenceBundle['teacherProfile'] | null;
+  const classroom = (await ClassroomModel.findById(payload.classroomId)
+    .select('_id cameraIds isActive')
+    .lean()) as SessionReferenceBundle['classroom'] | null;
+
+  if (!classGroup || !classGroup.isActive) {
+    throw new AppError(
+      'Class group not found or inactive.',
+      HTTP_STATUS.BAD_REQUEST,
+    );
+  }
+
+  if (!subject || !subject.isActive) {
+    throw new AppError('Subject not found or inactive.', HTTP_STATUS.BAD_REQUEST);
+  }
+
+  if (!teacherProfile) {
+    throw new AppError('Teacher profile not found.', HTTP_STATUS.BAD_REQUEST);
+  }
+
+  if (!classroom || !classroom.isActive) {
+    throw new AppError('Classroom not found or inactive.', HTTP_STATUS.BAD_REQUEST);
+  }
+
+  return {
+    classGroup,
+    subject,
+    teacherProfile,
+    classroom,
+  };
+};
+
+const resolveSessionTitle = (
+  explicitTitle: string | undefined,
+  references: SessionReferenceBundle,
+): string => {
+  if (explicitTitle) {
+    return explicitTitle;
+  }
+
+  return `${references.subject.name} - ${references.classGroup.code}`;
+};
+
+const resolveSessionCameraIds = (
+  explicitCameraIds: string[] | undefined,
+  classroomCameraIds: string[],
+): string[] => {
+  const resolvedCameraIds =
+    explicitCameraIds && explicitCameraIds.length > 0
+      ? explicitCameraIds
+      : classroomCameraIds;
+
+  if (classroomCameraIds.length > 0) {
+    const invalidCameraIds = resolvedCameraIds.filter(
+      (cameraId) => !classroomCameraIds.includes(cameraId),
+    );
+
+    if (invalidCameraIds.length > 0) {
+      throw new AppError(
+        'Session cameraIds must belong to the selected classroom.',
+        HTTP_STATUS.BAD_REQUEST,
+      );
+    }
+  }
+
+  return resolvedCameraIds;
+};
+
+const assertNoConcurrentActiveSession = async (
+  session: {
+    classroomId: unknown;
+    cameraIds: string[];
+  },
+  excludeId?: string,
+): Promise<void> => {
+  const orFilters: FilterQuery<Session>[] = [
+    { classroomId: session.classroomId },
+  ];
+
+  if (session.cameraIds.length > 0) {
+    orFilters.push({ cameraIds: { $in: session.cameraIds } });
+  }
+
+  const conflictingSession = await SessionModel.findOne({
+    ...(excludeId ? { _id: { $ne: excludeId } } : {}),
+    status: { $in: ACTIVE_SESSION_STATUSES },
+    $or: orFilters,
+  })
+    .select('_id title status')
+    .lean() as {
+    _id: unknown;
+    title?: string;
+    status: SessionStatus;
+  } | null;
+
+  if (conflictingSession) {
+    throw new AppError(
+      'Another started or active session already exists for this classroom or one of its cameras.',
+      HTTP_STATUS.CONFLICT,
+      {
+        conflictingSessionId: String(conflictingSession._id),
+        conflictingSessionStatus: conflictingSession.status,
+      },
+    );
+  }
+};
+
+const assertTeacherCanManageSession = async (
+  sessionTeacherId: unknown,
+  currentUser: AuthenticatedUser,
+): Promise<void> => {
+  if (currentUser.role !== UserRole.TEACHER) {
+    return;
+  }
+
+  const teacherProfile = await TeacherProfileModel.findOne({
+    userId: currentUser.userId,
+  })
+    .select('_id')
+    .lean() as { _id: unknown } | null;
+
+  if (!teacherProfile || String(teacherProfile._id) !== String(sessionTeacherId)) {
+    throw new AppError(
+      'You can only manage lifecycle actions for your own sessions.',
+      HTTP_STATUS.FORBIDDEN,
+    );
+  }
+};
+
+const assertSessionCanBeUpdated = (status: SessionStatus): void => {
+  if (status !== SessionStatus.CREATED) {
+    throw new AppError(
+      'Only sessions in created state can be updated.',
+      HTTP_STATUS.BAD_REQUEST,
+    );
+  }
+};
+
+const assertSessionCanBeDeleted = (status: SessionStatus): void => {
+  if (status !== SessionStatus.CREATED) {
+    throw new AppError(
+      'Only sessions in created state can be deleted.',
+      HTTP_STATUS.BAD_REQUEST,
+    );
+  }
+};
+
+export const sessionService = {
+  listSessions: async (
+    query: SessionListQuery,
+  ): Promise<PaginatedResult<unknown>> => {
+    const { page, limit, skip } = getPaginationOptions(query.page, query.limit);
+    const filter: FilterQuery<Session> = {};
+
+    if (query.search) {
+      const searchRegex = new RegExp(query.search, 'i');
+      filter.$or = [
+        { title: searchRegex },
+        { notes: searchRegex },
+        { scheduledStartTime: searchRegex },
+        { scheduledEndTime: searchRegex },
+      ];
+    }
+
+    if (query.scheduledDate) {
+      filter.scheduledDate = {
+        $gte: getDateOnly(query.scheduledDate),
+        $lt: getNextDateOnly(query.scheduledDate),
+      };
+    }
+
+    if (query.teacherId) {
+      filter.teacherId = query.teacherId;
+    }
+
+    if (query.classGroupId) {
+      filter.classGroupId = query.classGroupId;
+    }
+
+    if (query.subjectId) {
+      filter.subjectId = query.subjectId;
+    }
+
+    if (query.status) {
+      filter.status = query.status;
+    }
+
+    const [sessions, totalItems] = await Promise.all([
+      SessionModel.find(filter)
+        .sort({ scheduledDate: -1, scheduledStartTime: -1, createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      SessionModel.countDocuments(filter),
+    ]);
+
+    return {
+      items: sessions.map((session) => session.toJSON()),
+      meta: buildPaginationMeta(totalItems, page, limit),
+    };
+  },
+
+  getSessionById: async (id: string): Promise<unknown> => {
+    const session = await getSessionOrThrow(id);
+    return session.toJSON();
+  },
+
+  createSession: async (payload: SessionPayload): Promise<unknown> => {
+    const normalizedPayload = normalizeSessionPayload(payload);
+
+    ensureValidScheduleWindow(
+      normalizedPayload.scheduledStartTime!,
+      normalizedPayload.scheduledEndTime!,
+    );
+    ensureThresholdsAreConsistent(normalizedPayload);
+
+    const references = await getReferenceBundle({
+      classGroupId: normalizedPayload.classGroupId!,
+      subjectId: normalizedPayload.subjectId!,
+      teacherId: normalizedPayload.teacherId!,
+      classroomId: normalizedPayload.classroomId!,
+    });
+
+    const session = await SessionModel.create({
+      title: resolveSessionTitle(normalizedPayload.title, references),
+      classGroupId: normalizedPayload.classGroupId,
+      subjectId: normalizedPayload.subjectId,
+      teacherId: normalizedPayload.teacherId,
+      classroomId: normalizedPayload.classroomId,
+      cameraIds: resolveSessionCameraIds(
+        normalizedPayload.cameraIds,
+        references.classroom.cameraIds,
+      ),
+      scheduledDate: getDateOnly(normalizedPayload.scheduledDate!),
+      scheduledStartTime: normalizedPayload.scheduledStartTime,
+      scheduledEndTime: normalizedPayload.scheduledEndTime,
+      graceMinutesForLate: normalizedPayload.graceMinutesForLate,
+      minimumPresenceMinutes: normalizedPayload.minimumPresenceMinutes,
+      minimumPresencePercentage: normalizedPayload.minimumPresencePercentage,
+      notes: normalizedPayload.notes ?? null,
+      status: SessionStatus.CREATED,
+    });
+
+    return session.toJSON();
+  },
+
+  updateSession: async (id: string, payload: SessionPayload): Promise<unknown> => {
+    const session = await getSessionOrThrow(id);
+    assertSessionCanBeUpdated(session.status);
+
+    const normalizedPayload = normalizeSessionPayload(payload);
+    const scheduledStartTime =
+      normalizedPayload.scheduledStartTime ?? session.scheduledStartTime;
+    const scheduledEndTime =
+      normalizedPayload.scheduledEndTime ?? session.scheduledEndTime;
+
+    ensureValidScheduleWindow(scheduledStartTime, scheduledEndTime);
+    ensureThresholdsAreConsistent(normalizedPayload);
+
+    const referenceIds = {
+      classGroupId:
+        normalizedPayload.classGroupId ?? String(session.classGroupId),
+      subjectId: normalizedPayload.subjectId ?? String(session.subjectId),
+      teacherId: normalizedPayload.teacherId ?? String(session.teacherId),
+      classroomId: normalizedPayload.classroomId ?? String(session.classroomId),
+    };
+
+    const references = await getReferenceBundle(referenceIds);
+
+    session.title =
+      normalizedPayload.title === undefined
+        ? session.title ?? resolveSessionTitle(undefined, references)
+        : resolveSessionTitle(normalizedPayload.title, references);
+    session.classGroupId = references.classGroup._id as Session['classGroupId'];
+    session.subjectId = references.subject._id as Session['subjectId'];
+    session.teacherId = references.teacherProfile._id as Session['teacherId'];
+    session.classroomId = references.classroom._id as Session['classroomId'];
+    session.cameraIds = resolveSessionCameraIds(
+      normalizedPayload.cameraIds ?? session.cameraIds,
+      references.classroom.cameraIds,
+    );
+    session.scheduledDate = normalizedPayload.scheduledDate
+      ? getDateOnly(normalizedPayload.scheduledDate)
+      : session.scheduledDate;
+    session.scheduledStartTime = scheduledStartTime;
+    session.scheduledEndTime = scheduledEndTime;
+    session.graceMinutesForLate =
+      normalizedPayload.graceMinutesForLate ?? session.graceMinutesForLate;
+    session.minimumPresenceMinutes =
+      normalizedPayload.minimumPresenceMinutes ?? session.minimumPresenceMinutes;
+    session.minimumPresencePercentage =
+      normalizedPayload.minimumPresencePercentage ??
+      session.minimumPresencePercentage;
+    session.notes =
+      normalizedPayload.notes === undefined ? session.notes : normalizedPayload.notes;
+
+    await session.save();
+
+    return session.toJSON();
+  },
+
+  deleteSession: async (id: string): Promise<unknown> => {
+    const session = await getSessionOrThrow(id);
+    assertSessionCanBeDeleted(session.status);
+    await session.deleteOne();
+    return session.toJSON();
+  },
+
+  startSession: async (
+    id: string,
+    currentUser: AuthenticatedUser,
+    auditContext?: RequestAuditContext,
+  ): Promise<unknown> => {
+    const session = await getSessionOrThrow(id);
+
+    await assertTeacherCanManageSession(session.teacherId, currentUser);
+
+    if (session.status === SessionStatus.COMPLETED) {
+      throw new AppError(
+        'Completed sessions cannot be started again.',
+        HTTP_STATUS.BAD_REQUEST,
+      );
+    }
+
+    if (session.status === SessionStatus.ARCHIVED) {
+      throw new AppError(
+        'Archived sessions cannot be started.',
+        HTTP_STATUS.BAD_REQUEST,
+      );
+    }
+
+    if (session.status === SessionStatus.ACTIVE) {
+      throw new AppError(
+        'Session is already active.',
+        HTTP_STATUS.CONFLICT,
+      );
+    }
+
+    await assertNoConcurrentActiveSession(
+      {
+        classroomId: session.classroomId,
+        cameraIds: session.cameraIds,
+      },
+      session.id,
+    );
+
+    const now = new Date();
+    const scheduledStartAt = getScheduledDateTime(
+      session.scheduledDate,
+      session.scheduledStartTime,
+    );
+
+    if (!session.actualStartTime) {
+      session.actualStartTime = now;
+    }
+
+    session.status =
+      now >= scheduledStartAt ? SessionStatus.ACTIVE : SessionStatus.STARTED;
+
+    await session.save();
+    await auditService.logAction({
+      ...auditContext,
+      actorUserId: currentUser.userId,
+      action: 'session.start',
+      entityType: 'session',
+      entityId: session.id,
+      metadata: {
+        status: session.status,
+        actualStartTime: session.actualStartTime?.toISOString() ?? null,
+      },
+    });
+
+    return session.toJSON();
+  },
+
+  completeSession: async (
+    id: string,
+    currentUser: AuthenticatedUser,
+    auditContext?: RequestAuditContext,
+  ): Promise<unknown> => {
+    const session = await getSessionOrThrow(id);
+
+    await assertTeacherCanManageSession(session.teacherId, currentUser);
+
+    if (session.status === SessionStatus.ARCHIVED) {
+      throw new AppError(
+        'Archived sessions cannot be completed.',
+        HTTP_STATUS.BAD_REQUEST,
+      );
+    }
+
+    if (session.status === SessionStatus.COMPLETED) {
+      throw new AppError(
+        'Session is already completed.',
+        HTTP_STATUS.CONFLICT,
+      );
+    }
+
+    if (session.status === SessionStatus.CREATED) {
+      throw new AppError(
+        'Session must be started before it can be completed.',
+        HTTP_STATUS.BAD_REQUEST,
+      );
+    }
+
+    if (!session.actualStartTime) {
+      session.actualStartTime = new Date();
+    }
+
+    session.actualEndTime = new Date();
+    session.status = SessionStatus.COMPLETED;
+
+    await session.save();
+    await auditService.logAction({
+      ...auditContext,
+      actorUserId: currentUser.userId,
+      action: 'session.complete',
+      entityType: 'session',
+      entityId: session.id,
+      metadata: {
+        status: session.status,
+        actualEndTime: session.actualEndTime?.toISOString() ?? null,
+      },
+    });
+
+    return session.toJSON();
+  },
+
+  archiveSession: async (
+    id: string,
+    currentUser: AuthenticatedUser,
+    auditContext?: RequestAuditContext,
+  ): Promise<unknown> => {
+    const session = await getSessionOrThrow(id);
+
+    if (session.status === SessionStatus.ARCHIVED) {
+      throw new AppError(
+        'Session is already archived.',
+        HTTP_STATUS.CONFLICT,
+      );
+    }
+
+    if (
+      session.status === SessionStatus.STARTED ||
+      session.status === SessionStatus.ACTIVE
+    ) {
+      throw new AppError(
+        'Started or active sessions must be completed before archive.',
+        HTTP_STATUS.BAD_REQUEST,
+      );
+    }
+
+    session.status = SessionStatus.ARCHIVED;
+    await session.save();
+    await auditService.logAction({
+      ...auditContext,
+      actorUserId: currentUser.userId,
+      action: 'session.archive',
+      entityType: 'session',
+      entityId: session.id,
+      metadata: {
+        status: session.status,
+      },
+    });
+
+    return session.toJSON();
+  },
+};
