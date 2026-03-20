@@ -18,11 +18,23 @@ export const validateRequest = (schema: ValidationSchema) => {
       }
 
       if (schema.query) {
-        req.query = schema.query.parse(req.query) as Request['query'];
+        const parsedQuery = schema.query.parse(req.query) as Request['query'];
+
+        for (const key of Object.keys(req.query)) {
+          delete req.query[key];
+        }
+
+        Object.assign(req.query, parsedQuery);
       }
 
       if (schema.params) {
-        req.params = schema.params.parse(req.params) as Request['params'];
+        const parsedParams = schema.params.parse(req.params) as Request['params'];
+
+        for (const key of Object.keys(req.params)) {
+          delete req.params[key];
+        }
+
+        Object.assign(req.params, parsedParams);
       }
 
       next();
