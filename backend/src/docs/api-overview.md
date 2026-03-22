@@ -5,11 +5,20 @@
 - Health check: `GET /health`
 - API base: `/api/v1`
 
+## Roles
+
+- `super_admin`
+- `admin`
+- `teacher`
+- `student`
+
 ## Authentication
 
 - `POST /api/v1/auth/register`
 - `POST /api/v1/auth/login`
 - `GET /api/v1/auth/me`
+
+`/auth/login` is shared across all authenticated roles. Student login uses a normal `User` account with `role: "student"` linked to a `Student` record via `Student.userId`.
 
 ### Sample Register Payload
 
@@ -33,6 +42,9 @@
 
 ## Master Data
 
+- `GET|POST /api/v1/users`
+- `GET|PATCH /api/v1/users/:id`
+- `PATCH /api/v1/users/:id/status`
 - `GET|POST /api/v1/students`
 - `GET|PATCH|DELETE /api/v1/students/:id`
 - `GET|POST /api/v1/teachers`
@@ -80,10 +92,22 @@
   "lastName": "Sharma",
   "rollNumber": "CSE-2026-001",
   "email": "aarav.sharma@example.com",
+  "userId": "studentUserMongoId",
   "phone": "+91-9876543210",
   "gender": "male",
   "classGroupId": "mongoId",
   "status": "active"
+}
+```
+
+### Sample User Create Payload
+
+```json
+{
+  "fullName": "Aarav Sharma",
+  "email": "aarav.sharma@example.com",
+  "password": "Student@123",
+  "role": "student"
 }
 ```
 
@@ -121,6 +145,10 @@
 - `POST /api/v1/sessions/:id/start`
 - `POST /api/v1/sessions/:id/complete`
 - `POST /api/v1/sessions/:id/archive`
+- `GET /api/v1/live/active-sessions`
+- `GET /api/v1/live/sessions/:sessionId/overview`
+- `GET /api/v1/live/sessions/:sessionId/recent-events`
+- `GET /api/v1/live/sessions/:sessionId/recent-alerts`
 
 ### Sample Session Create Payload
 
@@ -218,6 +246,53 @@
 ## Unknown Face Alerts
 
 - `GET /api/v1/alerts/unknown-faces`
+
+## Face Profiles
+
+- `GET /api/v1/face-profiles/student/:studentId`
+- `POST /api/v1/face-profiles`
+- `PATCH /api/v1/face-profiles/:id`
+- `PATCH /api/v1/face-profiles/:id/status`
+- `GET /api/v1/face-profiles/overview`
+
+## Student Portal
+
+- `GET /api/v1/student-portal/me`
+- `GET /api/v1/student-portal/attendance-overview`
+- `GET /api/v1/student-portal/attendance-history`
+- `GET /api/v1/student-portal/attendance-history/export`
+- `GET /api/v1/student-portal/subjects`
+- `GET /api/v1/student-portal/session-history`
+
+## Timetable
+
+- `GET|POST /api/v1/timetable`
+- `GET|PATCH|DELETE /api/v1/timetable/:id`
+
+### Sample Timetable Entry Create Payload
+
+```json
+{
+  "classGroupId": "mongoId",
+  "subjectId": "mongoId",
+  "teacherId": "mongoId",
+  "classroomId": "mongoId",
+  "dayOfWeek": "monday",
+  "startTime": "10:00",
+  "endTime": "11:00",
+  "cameraIds": ["cam-01"],
+  "isActive": true,
+  "notes": "Regular slot"
+}
+```
+
+## Export APIs
+
+- `GET /api/v1/attendance/sessions/:sessionId/export?format=json|csv`
+- `GET /api/v1/attendance/students/:studentId/export?format=json|csv`
+- `GET /api/v1/attendance/class-groups/:classGroupId/export?format=json|csv`
+- `GET /api/v1/analytics/attendance-overview/export?format=json|csv`
+- `GET /api/v1/student-portal/attendance-history/export?format=json|csv`
 - `PATCH /api/v1/alerts/unknown-faces/:id/reviewed`
 
 ### Sample Alert Review Payload

@@ -14,6 +14,7 @@ export interface Student {
   email: string | null;
   phone: string | null;
   gender: StudentGender | null;
+  userId: Types.ObjectId | null;
   classGroupId: Types.ObjectId;
   status: StudentStatus;
   faceProfileId: Types.ObjectId | null;
@@ -60,6 +61,14 @@ const studentSchema = new Schema<Student>(
       enum: STUDENT_GENDER_VALUES,
       default: null,
     },
+    userId: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+      unique: true,
+      sparse: true,
+      index: true,
+    },
     classGroupId: {
       type: Schema.Types.ObjectId,
       ref: 'ClassGroup',
@@ -85,6 +94,7 @@ const studentSchema = new Schema<Student>(
       transform: (_doc, ret: Record<string, unknown>) => {
         ret.id = String(ret._id);
         delete ret.__v;
+        ret.userId = ret.userId ? String(ret.userId) : null;
         ret.classGroupId = ret.classGroupId ? String(ret.classGroupId) : null;
         ret.faceProfileId = ret.faceProfileId ? String(ret.faceProfileId) : null;
         return ret;
@@ -94,6 +104,7 @@ const studentSchema = new Schema<Student>(
 );
 
 studentSchema.index({ classGroupId: 1, status: 1 });
+studentSchema.index({ userId: 1 }, { unique: true, sparse: true });
 
 const StudentModel = models.Student || model<Student>('Student', studentSchema);
 

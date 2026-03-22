@@ -3,6 +3,9 @@ import jwt from 'jsonwebtoken';
 
 import env from '../config/env';
 import { HTTP_STATUS } from '../constants/http';
+import { UserRole } from '../constants/roles';
+import { StudentStatus } from '../constants/student';
+import StudentModel from '../models/Student.model';
 import UserModel from '../models/User.model';
 import { AuthTokenPayload, AuthenticatedUser } from '../types/auth.types';
 import { AppError } from '../utils/AppError';
@@ -41,10 +44,31 @@ const resolveAuthenticatedUser = async (token: string): Promise<AuthenticatedUse
     );
   }
 
+  let studentId: string | null = null;
+
+  if (user.role === UserRole.STUDENT) {
+    const student = (await StudentModel.findOne({
+      userId: user._id,
+      status: StudentStatus.ACTIVE,
+    })
+      .select('_id')
+      .lean()) as { _id: unknown } | null;
+
+    if (!student) {
+      throw new AppError(
+        'Authenticated student profile is not available.',
+        HTTP_STATUS.UNAUTHORIZED,
+      );
+    }
+
+    studentId = String(student._id);
+  }
+
   return {
     userId: String(user._id),
     email: user.email,
     role: user.role,
+    studentId,
   };
 };
 

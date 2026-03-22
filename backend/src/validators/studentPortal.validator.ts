@@ -1,8 +1,8 @@
 import { z } from 'zod';
 
+import { AttendanceStatus } from '../constants/attendance';
 import {
   exportFormatSchema,
-  objectIdSchema,
   paginationQuerySchema,
 } from './common.validator';
 
@@ -30,28 +30,27 @@ const withOptionalDateRange = <T extends z.ZodRawShape>(shape: T) =>
       },
     );
 
-export const analyticsOverviewQuerySchema = withOptionalDateRange({
-  classGroupId: objectIdSchema.optional(),
-});
-
-export const lowAttendanceQuerySchema = withOptionalDateRange({
-  ...paginationQuerySchema.shape,
-  classGroupId: objectIdSchema.optional(),
+export const studentPortalOverviewQuerySchema = withOptionalDateRange({
   threshold: z.coerce.number().min(0).max(100).default(75),
 });
 
-export const lateEntriesQuerySchema = withOptionalDateRange({
+export const studentPortalAttendanceHistoryQuerySchema = withOptionalDateRange({
   ...paginationQuerySchema.shape,
-  classGroupId: objectIdSchema.optional(),
+  status: z.nativeEnum(AttendanceStatus).optional(),
 });
 
-export const sessionAbsenteesParamSchema = z.object({
-  sessionId: objectIdSchema,
+export const studentPortalSubjectsQuerySchema = withOptionalDateRange({
+  ...paginationQuerySchema.shape,
+  threshold: z.coerce.number().min(0).max(100).default(75),
 });
 
-export const sessionAbsenteesQuerySchema = paginationQuerySchema;
+export const studentPortalSessionHistoryQuerySchema = withOptionalDateRange({
+  ...paginationQuerySchema.shape,
+  status: z.nativeEnum(AttendanceStatus).optional(),
+});
 
-export const analyticsOverviewExportQuerySchema = withOptionalDateRange({
-  classGroupId: objectIdSchema.optional(),
+export const studentPortalAttendanceExportQuerySchema = withOptionalDateRange({
+  search: z.string().trim().min(1).optional(),
+  status: z.nativeEnum(AttendanceStatus).optional(),
   format: exportFormatSchema,
 });

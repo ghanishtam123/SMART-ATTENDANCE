@@ -6,6 +6,7 @@ import { authenticate } from '../middleware/auth.middleware';
 import { authorize } from '../middleware/role.middleware';
 import { validateRequest } from '../middleware/validate.middleware';
 import {
+  analyticsOverviewExportQuerySchema,
   analyticsOverviewQuerySchema,
   lateEntriesQuerySchema,
   lowAttendanceQuerySchema,
@@ -22,6 +23,12 @@ router.get(
   authorize(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.TEACHER),
   validateRequest({ query: analyticsOverviewQuerySchema }),
   analyticsController.getAttendanceOverview,
+);
+router.get(
+  '/attendance-overview/export',
+  authorize(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.TEACHER),
+  validateRequest({ query: analyticsOverviewExportQuerySchema }),
+  analyticsController.exportAttendanceOverview,
 );
 router.get(
   '/low-attendance',

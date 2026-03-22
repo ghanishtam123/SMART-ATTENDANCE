@@ -1,6 +1,7 @@
 import { analyticsService } from '../services/analytics.service';
 import { ApiResponse } from '../utils/ApiResponse';
 import { asyncHandler } from '../utils/asyncHandler';
+import { sendExportResponse } from '../utils/export';
 
 const getAttendanceOverview = asyncHandler(async (req, res) => {
   const result = await analyticsService.getAttendanceOverview(req.query, req.user!);
@@ -51,9 +52,21 @@ const getSessionAbsentees = asyncHandler(async (req, res) => {
   });
 });
 
+const exportAttendanceOverview = asyncHandler(async (req, res) => {
+  const result = await analyticsService.exportAttendanceOverview(req.query, req.user!);
+
+  return sendExportResponse(
+    res,
+    req.query.format as 'json' | 'csv',
+    'Attendance overview export prepared successfully.',
+    result,
+  );
+});
+
 export const analyticsController = {
   getAttendanceOverview,
   getLowAttendanceStudents,
   getLateEntries,
   getSessionAbsentees,
+  exportAttendanceOverview,
 };

@@ -14,6 +14,7 @@ import {
   buildPaginationMeta,
   getPaginationOptions,
 } from '../utils/pagination';
+import { ExportPayload } from '../utils/export';
 
 interface DateRangeQuery {
   from?: string;
@@ -814,6 +815,34 @@ export const analyticsService = {
       session: session.toJSON(),
       items: paginatedResult.items,
       meta: paginatedResult.meta,
+    };
+  },
+
+  exportAttendanceOverview: async (
+    query: AttendanceOverviewQuery,
+    currentUser: AuthenticatedUser,
+  ): Promise<ExportPayload> => {
+    const summary = await analyticsService.getAttendanceOverview(
+      query,
+      currentUser,
+    ) as Record<string, unknown>;
+
+    return {
+      fileName: 'attendance-overview',
+      columns: [
+        { key: 'from', label: 'From' },
+        { key: 'to', label: 'To' },
+        { key: 'totalSessions', label: 'Total Sessions' },
+        { key: 'totalStudents', label: 'Total Students' },
+        { key: 'attendancePercentage', label: 'Attendance Percentage' },
+        { key: 'presentCount', label: 'Present Count' },
+        { key: 'lateCount', label: 'Late Count' },
+        { key: 'absentCount', label: 'Absent Count' },
+        { key: 'leftEarlyCount', label: 'Left Early Count' },
+        { key: 'unknownFaceAlertCount', label: 'Unknown Face Alert Count' },
+      ],
+      rows: [summary],
+      summary,
     };
   },
 };

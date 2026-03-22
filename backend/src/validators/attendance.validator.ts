@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { AttendanceStatus } from '../constants/attendance';
 import {
+  exportFormatSchema,
   idParamSchema,
   objectIdSchema,
   paginationQuerySchema,
@@ -54,3 +55,16 @@ export const studentAttendanceHistoryQuerySchema = withOptionalDateRange({
 });
 
 export const classGroupAttendanceSummaryQuerySchema = withOptionalDateRange({});
+
+export const sessionAttendanceExportQuerySchema = z.object({
+  format: exportFormatSchema,
+});
+
+export const studentAttendanceExportQuerySchema = withOptionalDateRange({
+  format: exportFormatSchema,
+  status: z.nativeEnum(AttendanceStatus).optional(),
+});
+
+export const classGroupAttendanceExportQuerySchema = withOptionalDateRange({
+  format: exportFormatSchema,
+});

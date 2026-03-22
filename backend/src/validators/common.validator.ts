@@ -35,3 +35,5 @@ export const optionalBooleanQuerySchema = z.preprocess((value) => {
 export const optionalObjectIdArraySchema = z
   .array(objectIdSchema)
   .default([]);
+
+export const exportFormatSchema = z.enum(['json', 'csv']).default('json');

@@ -20,12 +20,18 @@ export const createStudentSchema = z.object({
   email: z.string().trim().email().optional(),
   phone: z.string().trim().regex(phoneRegex, 'Invalid phone number.').optional(),
   gender: z.nativeEnum(StudentGender).optional(),
+  userId: objectIdSchema.optional(),
   classGroupId: objectIdSchema,
   status: z.nativeEnum(StudentStatus).default(StudentStatus.ACTIVE),
   faceProfileId: objectIdSchema.optional(),
 });
 
-export const updateStudentSchema = createStudentSchema.partial();
+export const updateStudentSchema = createStudentSchema
+  .omit({ userId: true })
+  .partial()
+  .extend({
+    userId: objectIdSchema.nullable().optional(),
+  });
 
 export const studentIdParamSchema = idParamSchema;
 

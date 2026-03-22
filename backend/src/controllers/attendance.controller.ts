@@ -3,6 +3,7 @@ import { buildAuditContext } from '../services/audit.service';
 import { attendanceService } from '../services/attendance.service';
 import { ApiResponse } from '../utils/ApiResponse';
 import { asyncHandler } from '../utils/asyncHandler';
+import { sendExportResponse } from '../utils/export';
 
 const recalculateSessionAttendance = asyncHandler(async (req, res) => {
   const result = await attendanceService.recalculateSessionAttendance(
@@ -84,6 +85,50 @@ const getStudentAttendanceHistory = asyncHandler(async (req, res) => {
   });
 });
 
+const exportSessionAttendanceRecords = asyncHandler(async (req, res) => {
+  const result = await attendanceService.getSessionAttendanceExport(
+    String(req.params.sessionId),
+    req.user!,
+  );
+
+  return sendExportResponse(
+    res,
+    req.query.format as 'json' | 'csv',
+    'Session attendance export prepared successfully.',
+    result,
+  );
+});
+
+const exportStudentAttendanceHistory = asyncHandler(async (req, res) => {
+  const result = await attendanceService.getStudentAttendanceExport(
+    String(req.params.studentId),
+    req.query,
+    req.user!,
+  );
+
+  return sendExportResponse(
+    res,
+    req.query.format as 'json' | 'csv',
+    'Student attendance export prepared successfully.',
+    result,
+  );
+});
+
+const exportClassGroupAttendanceSummary = asyncHandler(async (req, res) => {
+  const result = await attendanceService.getClassGroupAttendanceExport(
+    String(req.params.classGroupId),
+    req.query,
+    req.user!,
+  );
+
+  return sendExportResponse(
+    res,
+    req.query.format as 'json' | 'csv',
+    'Class group attendance export prepared successfully.',
+    result,
+  );
+});
+
 export const attendanceController = {
   recalculateSessionAttendance,
   finalizeSessionAttendance,
@@ -91,4 +136,7 @@ export const attendanceController = {
   getSessionAttendanceSummary,
   getClassGroupAttendanceSummary,
   getStudentAttendanceHistory,
+  exportSessionAttendanceRecords,
+  exportStudentAttendanceHistory,
+  exportClassGroupAttendanceSummary,
 };

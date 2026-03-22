@@ -1,9 +1,10 @@
 import jwt, { SignOptions } from 'jsonwebtoken';
-import { Types } from 'mongoose';
 
 import env from '../config/env';
 import { HTTP_STATUS } from '../constants/http';
 import { UserRole } from '../constants/roles';
+import { StudentStatus } from '../constants/student';
+import StudentModel from '../models/Student.model';
 import UserModel, { UserDocument } from '../models/User.model';
 import {
   AuthTokenPayload,
@@ -15,6 +16,11 @@ import {
 import { RequestAuditContext } from '../types/common.types';
 import { AppError } from '../utils/AppError';
 import { auditService } from './audit.service';
+import {
+  assertUserCreationAllowed,
+  resolveLinkedStudentId,
+  sanitizeUser,
+} from './userAccount.service';
 
 interface RegisterContext {
   currentUser?: AuthenticatedUser;
@@ -29,76 +35,42 @@ interface LoginResponse {
   expiresIn: string;
 }
 
-const sanitizeUser = (user: UserDocument): SafeUser => {
-  return {
-    id: user.id,
-    fullName: user.fullName,
-    email: user.email,
-    role: user.role,
-    isActive: user.isActive,
-    lastLoginAt: user.lastLoginAt ?? null,
-    createdBy: user.createdBy ? user.createdBy.toString() : null,
-    createdAt: user.createdAt,
-    updatedAt: user.updatedAt,
-  };
-};
-
 const signAccessToken = (payload: AuthTokenPayload): string => {
   return jwt.sign(payload, env.JWT_SECRET, {
     expiresIn: env.JWT_EXPIRES_IN as SignOptions['expiresIn'],
   });
 };
 
-const assertRegistrationAllowed = async (
-  payload: RegisterInput,
-  context: RegisterContext,
-): Promise<Types.ObjectId | null> => {
-  const totalUsers = await UserModel.countDocuments();
-
-  if (totalUsers === 0) {
-    if (!env.AUTH_BOOTSTRAP_ENABLED) {
-      throw new AppError(
-        'Initial super_admin bootstrap is disabled.',
-        HTTP_STATUS.FORBIDDEN,
-      );
-    }
-
-    if (payload.role !== UserRole.SUPER_ADMIN) {
-      throw new AppError(
-        'The first user must be created with the super_admin role.',
-        HTTP_STATUS.FORBIDDEN,
-      );
-    }
-
-    if (context.bootstrapSecret !== env.AUTH_BOOTSTRAP_SECRET) {
-      throw new AppError(
-        'Invalid bootstrap secret.',
-        HTTP_STATUS.UNAUTHORIZED,
-      );
-    }
-
+const resolveLinkedStudentIdForUser = async (
+  user: Pick<UserDocument, '_id' | 'role'>,
+): Promise<string | null> => {
+  if (user.role !== UserRole.STUDENT) {
     return null;
   }
 
-  if (!context.currentUser) {
+  return resolveLinkedStudentId(user._id);
+};
+
+const assertStudentCanAuthenticate = async (user: Pick<UserDocument, '_id' | 'role'>) => {
+  if (user.role !== UserRole.STUDENT) {
+    return null;
+  }
+
+  const linkedStudent = (await StudentModel.findOne({
+    userId: user._id,
+    status: StudentStatus.ACTIVE,
+  })
+    .select('_id')
+    .lean()) as { _id: unknown } | null;
+
+  if (!linkedStudent) {
     throw new AppError(
-      'Registration is restricted to authenticated administrators.',
+      'Student login is not available until the student account is linked and active.',
       HTTP_STATUS.FORBIDDEN,
     );
   }
 
-  if (context.currentUser.role === UserRole.SUPER_ADMIN) {
-    return new Types.ObjectId(context.currentUser.userId);
-  }
-
-  if (context.currentUser.role === UserRole.ADMIN && payload.role === UserRole.TEACHER) {
-    return new Types.ObjectId(context.currentUser.userId);
-  }
-
-  throw new AppError(
-    'You are not allowed to create a user with this role.',
-    HTTP_STATUS.FORBIDDEN,
-  );
+  return String(linkedStudent._id);
 };
 
 export const authService = {
@@ -119,8 +91,8 @@ export const authService = {
       );
     }
 
-    const createdBy = await assertRegistrationAllowed(
-      { ...payload, email: normalizedEmail },
+    const createdBy = await assertUserCreationAllowed(
+      payload.role,
       context,
     );
 
@@ -182,6 +154,8 @@ export const authService = {
       );
     }
 
+    const linkedStudentId = await assertStudentCanAuthenticate(user);
+
     user.lastLoginAt = new Date();
     await user.save();
     await auditService.logAction({
@@ -193,6 +167,7 @@ export const authService = {
       metadata: {
         email: user.email,
         role: user.role,
+        linkedStudentId,
         lastLoginAt: user.lastLoginAt?.toISOString() ?? null,
       },
     });
@@ -205,7 +180,7 @@ export const authService = {
     const accessToken = signAccessToken(tokenPayload);
 
     return {
-      user: sanitizeUser(user),
+      user: sanitizeUser(user, linkedStudentId),
       accessToken,
       tokenType: 'Bearer',
       expiresIn: env.JWT_EXPIRES_IN,
@@ -223,7 +198,10 @@ export const authService = {
     }
 
     return {
-      user: sanitizeUser(user),
+      user: sanitizeUser(
+        user,
+        await resolveLinkedStudentIdForUser(user),
+      ),
     };
   },
 };

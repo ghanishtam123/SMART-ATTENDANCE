@@ -1,9 +1,11 @@
 import { FilterQuery } from 'mongoose';
 
 import { HTTP_STATUS } from '../constants/http';
+import { UserRole } from '../constants/roles';
 import { StudentStatus } from '../constants/student';
 import ClassGroupModel from '../models/ClassGroup.model';
 import StudentModel, { Student } from '../models/Student.model';
+import UserModel from '../models/User.model';
 import { PaginatedResult, RequestAuditContext } from '../types/common.types';
 import { AppError } from '../utils/AppError';
 import {
@@ -28,6 +30,7 @@ interface StudentPayload {
   email?: string | null;
   phone?: string | null;
   gender?: Student['gender'];
+  userId?: string | null;
   classGroupId?: string;
   status?: StudentStatus;
   faceProfileId?: string | null;
@@ -59,10 +62,36 @@ const normalizeStudentPayload = (payload: StudentPayload) => {
         : payload.phone === null || payload.phone.trim() === ''
           ? null
           : payload.phone.trim(),
+    userId:
+      payload.userId === undefined || payload.userId === ''
+        ? undefined
+        : payload.userId,
     faceProfileId:
       payload.faceProfileId === undefined || payload.faceProfileId === ''
         ? undefined
         : payload.faceProfileId,
+  };
+};
+
+const getStudentLinkedUser = async (userId: string) => {
+  const user = await UserModel.findById(userId)
+    .select('_id role email')
+    .lean();
+
+  if (!user) {
+    throw new AppError('Linked user not found.', HTTP_STATUS.NOT_FOUND);
+  }
+
+  if (user.role !== UserRole.STUDENT) {
+    throw new AppError(
+      'Student records can only be linked to a user with student role.',
+      HTTP_STATUS.BAD_REQUEST,
+    );
+  }
+
+  return {
+    id: String(user._id),
+    email: user.email,
   };
 };
 
@@ -101,6 +130,22 @@ const assertStudentDuplicates = async (
       );
     }
   }
+
+  if (payload.userId) {
+    const existingStudent = await StudentModel.findOne({
+      userId: payload.userId,
+      ...(excludeId ? { _id: { $ne: excludeId } } : {}),
+    })
+      .select('_id')
+      .lean();
+
+    if (existingStudent) {
+      throw new AppError(
+        'A student is already linked to this user.',
+        HTTP_STATUS.CONFLICT,
+      );
+    }
+  }
 };
 
 const getStudentOrThrow = async (id: string) => {
@@ -111,6 +156,16 @@ const getStudentOrThrow = async (id: string) => {
   }
 
   return student;
+};
+
+const assignStudentField = (
+  student: Awaited<ReturnType<typeof getStudentOrThrow>>,
+  key: keyof Student,
+  value: unknown,
+) => {
+  if (value !== undefined) {
+    student.set(key, value);
+  }
 };
 
 export const studentService = {
@@ -171,17 +226,36 @@ export const studentService = {
     auditContext?: RequestAuditContext,
   ): Promise<unknown> => {
     const normalizedPayload = normalizeStudentPayload(payload);
+    const linkedUser = normalizedPayload.userId
+      ? await getStudentLinkedUser(normalizedPayload.userId)
+      : null;
+
+    if (
+      linkedUser &&
+      normalizedPayload.email !== undefined &&
+      normalizedPayload.email !== null &&
+      normalizedPayload.email !== linkedUser.email
+    ) {
+      throw new AppError(
+        'Student email must match the linked student user email.',
+        HTTP_STATUS.BAD_REQUEST,
+      );
+    }
 
     await ensureClassGroupExists(normalizedPayload.classGroupId!);
-    await assertStudentDuplicates(normalizedPayload);
+    await assertStudentDuplicates({
+      ...normalizedPayload,
+      email: linkedUser?.email ?? normalizedPayload.email,
+    });
 
     const student = await StudentModel.create({
       firstName: normalizedPayload.firstName,
       lastName: normalizedPayload.lastName,
       rollNumber: normalizedPayload.rollNumber,
-      email: normalizedPayload.email ?? null,
+      email: linkedUser?.email ?? normalizedPayload.email ?? null,
       phone: normalizedPayload.phone ?? null,
       gender: normalizedPayload.gender ?? null,
+      userId: normalizedPayload.userId ?? null,
       classGroupId: normalizedPayload.classGroupId,
       status: normalizedPayload.status ?? StudentStatus.ACTIVE,
       faceProfileId: normalizedPayload.faceProfileId ?? null,
@@ -208,6 +282,10 @@ export const studentService = {
   ): Promise<unknown> => {
     const student = await getStudentOrThrow(id);
     const normalizedPayload = normalizeStudentPayload(payload);
+    const linkedUser =
+      normalizedPayload.userId && normalizedPayload.userId !== null
+        ? await getStudentLinkedUser(normalizedPayload.userId)
+        : null;
     const updatedFieldNames = Object.keys(payload).filter((fieldName) => {
       const value = payload[fieldName as keyof StudentPayload];
       return value !== undefined;
@@ -217,9 +295,40 @@ export const studentService = {
       await ensureClassGroupExists(normalizedPayload.classGroupId);
     }
 
-    await assertStudentDuplicates(normalizedPayload, id);
+    if (
+      linkedUser &&
+      normalizedPayload.email !== undefined &&
+      normalizedPayload.email !== null &&
+      normalizedPayload.email !== linkedUser.email
+    ) {
+      throw new AppError(
+        'Student email must match the linked student user email.',
+        HTTP_STATUS.BAD_REQUEST,
+      );
+    }
 
-    Object.assign(student, normalizedPayload);
+    await assertStudentDuplicates(
+      {
+        ...normalizedPayload,
+        email: linkedUser?.email ?? normalizedPayload.email,
+      },
+      id,
+    );
+
+    assignStudentField(student, 'firstName', normalizedPayload.firstName);
+    assignStudentField(student, 'lastName', normalizedPayload.lastName);
+    assignStudentField(student, 'rollNumber', normalizedPayload.rollNumber);
+    assignStudentField(
+      student,
+      'email',
+      linkedUser?.email ?? normalizedPayload.email,
+    );
+    assignStudentField(student, 'phone', normalizedPayload.phone);
+    assignStudentField(student, 'gender', normalizedPayload.gender);
+    assignStudentField(student, 'userId', normalizedPayload.userId);
+    assignStudentField(student, 'classGroupId', normalizedPayload.classGroupId);
+    assignStudentField(student, 'status', normalizedPayload.status);
+    assignStudentField(student, 'faceProfileId', normalizedPayload.faceProfileId);
     await student.save();
     await auditService.logAction({
       ...auditContext,

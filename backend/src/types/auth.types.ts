@@ -6,13 +6,16 @@ export interface AuthTokenPayload {
   role: UserRole;
 }
 
-export interface AuthenticatedUser extends AuthTokenPayload {}
+export interface AuthenticatedUser extends AuthTokenPayload {
+  studentId: string | null;
+}
 
 export interface SafeUser {
   id: string;
   fullName: string;
   email: string;
   role: UserRole;
+  linkedStudentId: string | null;
   isActive: boolean;
   lastLoginAt: Date | null;
   createdBy: string | null;

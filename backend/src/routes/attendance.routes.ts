@@ -7,9 +7,12 @@ import { authorize } from '../middleware/role.middleware';
 import { validateRequest } from '../middleware/validate.middleware';
 import {
   classGroupAttendanceParamSchema,
+  classGroupAttendanceExportQuerySchema,
   classGroupAttendanceSummaryQuerySchema,
+  sessionAttendanceExportQuerySchema,
   sessionAttendanceParamSchema,
   sessionAttendanceRecordsQuerySchema,
+  studentAttendanceExportQuerySchema,
   studentAttendanceHistoryQuerySchema,
   studentAttendanceParamSchema,
 } from '../validators/attendance.validator';
@@ -40,6 +43,15 @@ router.get(
   attendanceController.getSessionAttendanceRecords,
 );
 router.get(
+  '/sessions/:sessionId/export',
+  authorize(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.TEACHER),
+  validateRequest({
+    params: sessionAttendanceParamSchema,
+    query: sessionAttendanceExportQuerySchema,
+  }),
+  attendanceController.exportSessionAttendanceRecords,
+);
+router.get(
   '/sessions/:sessionId/summary',
   authorize(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.TEACHER),
   validateRequest({ params: sessionAttendanceParamSchema }),
@@ -55,6 +67,15 @@ router.get(
   attendanceController.getClassGroupAttendanceSummary,
 );
 router.get(
+  '/class-groups/:classGroupId/export',
+  authorize(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.TEACHER),
+  validateRequest({
+    params: classGroupAttendanceParamSchema,
+    query: classGroupAttendanceExportQuerySchema,
+  }),
+  attendanceController.exportClassGroupAttendanceSummary,
+);
+router.get(
   '/students/:studentId/history',
   authorize(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.TEACHER),
   validateRequest({
@@ -62,6 +83,15 @@ router.get(
     query: studentAttendanceHistoryQuerySchema,
   }),
   attendanceController.getStudentAttendanceHistory,
+);
+router.get(
+  '/students/:studentId/export',
+  authorize(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.TEACHER),
+  validateRequest({
+    params: studentAttendanceParamSchema,
+    query: studentAttendanceExportQuerySchema,
+  }),
+  attendanceController.exportStudentAttendanceHistory,
 );
 
 export default router;

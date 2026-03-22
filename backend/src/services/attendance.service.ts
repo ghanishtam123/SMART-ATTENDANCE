@@ -21,6 +21,7 @@ import {
   buildPaginationMeta,
   getPaginationOptions,
 } from '../utils/pagination';
+import { ExportPayload } from '../utils/export';
 import { auditService } from './audit.service';
 import { attendanceRuleService } from './attendanceRule.service';
 
@@ -653,6 +654,420 @@ export const attendanceService = {
     return {
       items: records.map((record) => record.toJSON()),
       meta: buildPaginationMeta(totalItems, page, limit),
+    };
+  },
+
+  getSessionAttendanceExport: async (
+    sessionId: string,
+    currentUser: AuthenticatedUser,
+  ): Promise<ExportPayload> => {
+    const session = await getSessionOrThrow(sessionId);
+    await assertTeacherCanAccessSession(session.teacherId, currentUser);
+
+    const [summary, rows] = await Promise.all([
+      attendanceService.getSessionAttendanceSummary(sessionId, currentUser) as Promise<
+        Record<string, unknown>
+      >,
+      AttendanceRecordModel.aggregate<Record<string, unknown>>([
+        {
+          $match: {
+            sessionId: session._id,
+          },
+        },
+        {
+          $lookup: {
+            from: 'students',
+            localField: 'studentId',
+            foreignField: '_id',
+            as: 'student',
+          },
+        },
+        {
+          $unwind: {
+            path: '$student',
+            preserveNullAndEmptyArrays: true,
+          },
+        },
+        {
+          $addFields: {
+            fullName: {
+              $trim: {
+                input: {
+                  $concat: ['$student.firstName', ' ', '$student.lastName'],
+                },
+              },
+            },
+          },
+        },
+        {
+          $project: {
+            _id: 0,
+            attendanceRecordId: { $toString: '$_id' },
+            studentId: { $toString: '$studentId' },
+            fullName: 1,
+            rollNumber: '$student.rollNumber',
+            email: '$student.email',
+            status: 1,
+            firstSeenAt: 1,
+            lastSeenAt: 1,
+            totalPresenceMinutes: 1,
+            attendancePercentageInSession: 1,
+            confidenceAverage: 1,
+            eventCount: 1,
+            finalizedAt: 1,
+            remarks: 1,
+          },
+        },
+        {
+          $sort: {
+            rollNumber: 1,
+            fullName: 1,
+          },
+        },
+      ]),
+    ]);
+
+    return {
+      fileName: `session-attendance-${sessionId}`,
+      columns: [
+        { key: 'attendanceRecordId', label: 'Attendance Record ID' },
+        { key: 'studentId', label: 'Student ID' },
+        { key: 'fullName', label: 'Full Name' },
+        { key: 'rollNumber', label: 'Roll Number' },
+        { key: 'email', label: 'Email' },
+        { key: 'status', label: 'Status' },
+        { key: 'firstSeenAt', label: 'First Seen At' },
+        { key: 'lastSeenAt', label: 'Last Seen At' },
+        { key: 'totalPresenceMinutes', label: 'Total Presence Minutes' },
+        {
+          key: 'attendancePercentageInSession',
+          label: 'Attendance Percentage In Session',
+        },
+        { key: 'confidenceAverage', label: 'Confidence Average' },
+        { key: 'eventCount', label: 'Event Count' },
+        { key: 'finalizedAt', label: 'Finalized At' },
+        { key: 'remarks', label: 'Remarks' },
+      ],
+      rows,
+      summary,
+    };
+  },
+
+  getStudentAttendanceExport: async (
+    studentId: string,
+    query: StudentAttendanceHistoryQuery,
+    currentUser: AuthenticatedUser,
+  ): Promise<ExportPayload> => {
+    const student = await StudentModel.findById(studentId);
+
+    if (!student) {
+      throw new AppError('Student not found.', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const filter: FilterQuery<AttendanceRecord> = {
+      studentId: new Types.ObjectId(studentId),
+    };
+
+    if (query.status) {
+      filter.status = query.status;
+    }
+
+    if (query.from || query.to) {
+      const sessionFilter = await buildScopedSessionFilter(currentUser, {}, query);
+      const sessions = await SessionModel.find(sessionFilter).select('_id').lean();
+
+      if (sessions.length === 0) {
+        return {
+          fileName: `student-attendance-${studentId}`,
+          columns: [
+            { key: 'attendanceRecordId', label: 'Attendance Record ID' },
+            { key: 'sessionId', label: 'Session ID' },
+            { key: 'sessionTitle', label: 'Session Title' },
+            { key: 'scheduledDate', label: 'Scheduled Date' },
+            { key: 'subjectCode', label: 'Subject Code' },
+            { key: 'subjectName', label: 'Subject Name' },
+            { key: 'status', label: 'Status' },
+          ],
+          rows: [],
+          summary: {
+            studentId,
+            totalRecords: 0,
+          },
+        };
+      }
+
+      filter.sessionId = { $in: sessions.map((session) => session._id) };
+    }
+
+    if (currentUser.role === UserRole.TEACHER) {
+      const teacherProfileId = await getTeacherProfileIdForUser(currentUser);
+
+      if (!teacherProfileId) {
+        throw new AppError(
+          'Teacher profile not found for the authenticated user.',
+          HTTP_STATUS.FORBIDDEN,
+        );
+      }
+
+      filter.teacherId = new Types.ObjectId(teacherProfileId);
+    }
+
+    const rows = await AttendanceRecordModel.aggregate<Record<string, unknown>>([
+      {
+        $match: filter,
+      },
+      {
+        $lookup: {
+          from: 'sessions',
+          localField: 'sessionId',
+          foreignField: '_id',
+          as: 'session',
+        },
+      },
+      { $unwind: '$session' },
+      {
+        $lookup: {
+          from: 'subjects',
+          localField: 'subjectId',
+          foreignField: '_id',
+          as: 'subject',
+        },
+      },
+      {
+        $unwind: {
+          path: '$subject',
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          attendanceRecordId: { $toString: '$_id' },
+          sessionId: { $toString: '$sessionId' },
+          sessionTitle: '$session.title',
+          scheduledDate: '$session.scheduledDate',
+          scheduledStartTime: '$session.scheduledStartTime',
+          scheduledEndTime: '$session.scheduledEndTime',
+          subjectCode: '$subject.code',
+          subjectName: '$subject.name',
+          status: 1,
+          firstSeenAt: 1,
+          lastSeenAt: 1,
+          totalPresenceMinutes: 1,
+          attendancePercentageInSession: 1,
+          confidenceAverage: 1,
+          eventCount: 1,
+          finalizedAt: 1,
+          remarks: 1,
+        },
+      },
+      {
+        $sort: {
+          scheduledDate: -1,
+          scheduledStartTime: -1,
+        },
+      },
+    ]);
+
+    const attendedCount = rows.filter((row) => row.status !== AttendanceStatus.ABSENT).length;
+
+    return {
+      fileName: `student-attendance-${studentId}`,
+      columns: [
+        { key: 'attendanceRecordId', label: 'Attendance Record ID' },
+        { key: 'sessionId', label: 'Session ID' },
+        { key: 'sessionTitle', label: 'Session Title' },
+        { key: 'scheduledDate', label: 'Scheduled Date' },
+        { key: 'scheduledStartTime', label: 'Scheduled Start Time' },
+        { key: 'scheduledEndTime', label: 'Scheduled End Time' },
+        { key: 'subjectCode', label: 'Subject Code' },
+        { key: 'subjectName', label: 'Subject Name' },
+        { key: 'status', label: 'Status' },
+        { key: 'firstSeenAt', label: 'First Seen At' },
+        { key: 'lastSeenAt', label: 'Last Seen At' },
+        { key: 'totalPresenceMinutes', label: 'Total Presence Minutes' },
+        {
+          key: 'attendancePercentageInSession',
+          label: 'Attendance Percentage In Session',
+        },
+        { key: 'confidenceAverage', label: 'Confidence Average' },
+        { key: 'eventCount', label: 'Event Count' },
+        { key: 'finalizedAt', label: 'Finalized At' },
+        { key: 'remarks', label: 'Remarks' },
+      ],
+      rows,
+      summary: {
+        studentId,
+        totalRecords: rows.length,
+        attendancePercentage: calculateAttendancePercentage(attendedCount, rows.length),
+      },
+    };
+  },
+
+  getClassGroupAttendanceExport: async (
+    classGroupId: string,
+    query: ClassGroupAttendanceSummaryQuery,
+    currentUser: AuthenticatedUser,
+  ): Promise<ExportPayload> => {
+    const classGroup = await ClassGroupModel.findById(classGroupId);
+
+    if (!classGroup) {
+      throw new AppError('Class group not found.', HTTP_STATUS.NOT_FOUND);
+    }
+
+    const sessionFilter = await buildScopedSessionFilter(
+      currentUser,
+      { classGroupId },
+      query,
+    );
+    const sessions = await SessionModel.find(sessionFilter).select('_id').lean();
+    const summary = await attendanceService.getClassGroupAttendanceSummary(
+      classGroupId,
+      query,
+      currentUser,
+    ) as Record<string, unknown>;
+
+    if (sessions.length === 0) {
+      return {
+        fileName: `class-group-attendance-${classGroupId}`,
+        columns: [
+          { key: 'studentId', label: 'Student ID' },
+          { key: 'fullName', label: 'Full Name' },
+          { key: 'rollNumber', label: 'Roll Number' },
+          { key: 'email', label: 'Email' },
+          { key: 'totalSessions', label: 'Total Sessions' },
+          { key: 'attendedSessions', label: 'Attended Sessions' },
+          { key: 'attendancePercentage', label: 'Attendance Percentage' },
+        ],
+        rows: [],
+        summary,
+      };
+    }
+
+    const rows = await AttendanceRecordModel.aggregate<Record<string, unknown>>([
+      {
+        $match: {
+          sessionId: { $in: sessions.map((session) => session._id) },
+        },
+      },
+      {
+        $group: {
+          _id: '$studentId',
+          totalSessions: { $sum: 1 },
+          attendedSessions: {
+            $sum: {
+              $cond: [{ $ne: ['$status', AttendanceStatus.ABSENT] }, 1, 0],
+            },
+          },
+          presentCount: {
+            $sum: {
+              $cond: [{ $eq: ['$status', AttendanceStatus.PRESENT] }, 1, 0],
+            },
+          },
+          lateCount: {
+            $sum: {
+              $cond: [{ $eq: ['$status', AttendanceStatus.LATE] }, 1, 0],
+            },
+          },
+          absentCount: {
+            $sum: {
+              $cond: [{ $eq: ['$status', AttendanceStatus.ABSENT] }, 1, 0],
+            },
+          },
+          leftEarlyCount: {
+            $sum: {
+              $cond: [{ $eq: ['$status', AttendanceStatus.LEFT_EARLY] }, 1, 0],
+            },
+          },
+        },
+      },
+      {
+        $addFields: {
+          attendancePercentage: {
+            $round: [
+              {
+                $multiply: [
+                  {
+                    $divide: [
+                      '$attendedSessions',
+                      {
+                        $cond: [
+                          { $gt: ['$totalSessions', 0] },
+                          '$totalSessions',
+                          1,
+                        ],
+                      },
+                    ],
+                  },
+                  100,
+                ],
+              },
+              2,
+            ],
+          },
+        },
+      },
+      {
+        $lookup: {
+          from: 'students',
+          localField: '_id',
+          foreignField: '_id',
+          as: 'student',
+        },
+      },
+      { $unwind: '$student' },
+      {
+        $addFields: {
+          fullName: {
+            $trim: {
+              input: {
+                $concat: ['$student.firstName', ' ', '$student.lastName'],
+              },
+            },
+          },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          studentId: { $toString: '$_id' },
+          fullName: 1,
+          rollNumber: '$student.rollNumber',
+          email: '$student.email',
+          totalSessions: 1,
+          attendedSessions: 1,
+          attendancePercentage: 1,
+          presentCount: 1,
+          lateCount: 1,
+          absentCount: 1,
+          leftEarlyCount: 1,
+        },
+      },
+      {
+        $sort: {
+          attendancePercentage: 1,
+          rollNumber: 1,
+        },
+      },
+    ]);
+
+    return {
+      fileName: `class-group-attendance-${classGroupId}`,
+      columns: [
+        { key: 'studentId', label: 'Student ID' },
+        { key: 'fullName', label: 'Full Name' },
+        { key: 'rollNumber', label: 'Roll Number' },
+        { key: 'email', label: 'Email' },
+        { key: 'totalSessions', label: 'Total Sessions' },
+        { key: 'attendedSessions', label: 'Attended Sessions' },
+        { key: 'attendancePercentage', label: 'Attendance Percentage' },
+        { key: 'presentCount', label: 'Present Count' },
+        { key: 'lateCount', label: 'Late Count' },
+        { key: 'absentCount', label: 'Absent Count' },
+        { key: 'leftEarlyCount', label: 'Left Early Count' },
+      ],
+      rows,
+      summary,
     };
   },
 };
