@@ -2,7 +2,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import { z } from 'zod'
 
 import { classGroupsApi } from '../../api/classGroups.api'
@@ -22,8 +22,9 @@ import DataTable, { type DataTableColumn } from '../../components/tables/DataTab
 import TableActions from '../../components/tables/TableActions'
 import { routes } from '../../constants/routes'
 import useDebounce from '../../hooks/useDebounce'
+import type { User } from '../../types/user'
 import type {
-  CreateStudentInput,
+  CreateStudentPayload,
   Student,
   StudentGender,
   StudentStatus,
@@ -33,14 +34,35 @@ import { getErrorMessage } from '../../utils/format'
 
 const phoneRegex = /^[0-9+\-\s()]{7,20}$/
 
-const studentSchema = z.object({
+interface StudentFormValues {
+  firstName: string
+  lastName: string
+  rollNumber: string
+  email: string
+  phone: string
+  gender: '' | StudentGender
+  classGroupId: string
+  status: StudentStatus
+  createLoginAccount: boolean
+  userId: string
+  login: {
+    email: string
+    password: string
+    isActive: boolean
+  }
+}
+
+const isValidOptionalEmail = (value: string) =>
+  !value || z.string().email().safeParse(value).success
+
+const studentFormSchemaBase = z.object({
   firstName: z.string().trim().min(2, 'First name must be at least 2 characters.'),
   lastName: z.string().trim().min(1, 'Last name is required.'),
   rollNumber: z.string().trim().min(1, 'Roll number is required.'),
   email: z
     .string()
     .trim()
-    .refine((value) => !value || z.string().email().safeParse(value).success, {
+    .refine(isValidOptionalEmail, {
       message: 'Enter a valid email address.',
     }),
   phone: z
@@ -50,12 +72,64 @@ const studentSchema = z.object({
       message: 'Enter a valid phone number.',
     }),
   gender: z.enum(['', 'male', 'female', 'other']),
-  userId: z.string().optional(),
   classGroupId: z.string().trim().min(1, 'Select a class group.'),
   status: z.enum(['active', 'inactive']),
+  createLoginAccount: z.boolean(),
+  userId: z.string(),
+  login: z.object({
+    email: z
+      .string()
+      .trim()
+      .refine(isValidOptionalEmail, {
+        message: 'Enter a valid login email address.',
+      }),
+    password: z.string(),
+    isActive: z.boolean(),
+  }),
 })
 
-type StudentFormValues = z.infer<typeof studentSchema>
+const buildStudentFormSchema = (isEditMode: boolean) =>
+  studentFormSchemaBase.superRefine((value, ctx) => {
+    if (isEditMode) {
+      return
+    }
+
+    if (value.createLoginAccount) {
+      if (!value.login.email.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['login', 'email'],
+          message: 'Login email is required when login creation is enabled.',
+        })
+      }
+
+      if (value.login.password.trim().length < 8) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['login', 'password'],
+          message: 'Password must be at least 8 characters.',
+        })
+      }
+
+      if (
+        value.email.trim() &&
+        value.login.email.trim() &&
+        value.email.trim().toLowerCase() !== value.login.email.trim().toLowerCase()
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['login', 'email'],
+          message: 'Student email and login email must match.',
+        })
+      }
+
+      return
+    }
+
+    if (!value.userId.trim()) {
+      return
+    }
+  })
 
 const studentStatusOptions = [
   { value: 'active', label: 'Active' },
@@ -69,20 +143,30 @@ const genderOptions = [
   { value: 'other', label: 'Other' },
 ]
 
-const getDefaultValues = (student?: Student | null): StudentFormValues => ({
+const getDefaultValues = (
+  student?: Student | null,
+  linkedUser?: User | null,
+): StudentFormValues => ({
   firstName: student?.firstName ?? '',
   lastName: student?.lastName ?? '',
   rollNumber: student?.rollNumber ?? '',
   email: student?.email ?? '',
   phone: student?.phone ?? '',
   gender: (student?.gender ?? '') as '' | StudentGender,
-  userId: student?.userId ?? '',
   classGroupId: student?.classGroupId ?? '',
   status: (student?.status ?? 'active') as StudentStatus,
+  createLoginAccount: false,
+  userId: student?.userId ?? '',
+  login: {
+    email: student?.email ?? linkedUser?.email ?? '',
+    password: '',
+    isActive: linkedUser?.isActive ?? true,
+  },
 })
 
 interface StudentFormProps {
   student?: Student | null
+  linkedUser?: User | null
   userOptions: Array<{ label: string; value: string }>
   classGroupOptions: Array<{ label: string; value: string }>
   submitError: string | null
@@ -94,6 +178,7 @@ interface StudentFormProps {
 
 function StudentForm({
   student,
+  linkedUser,
   userOptions,
   classGroupOptions,
   submitError,
@@ -102,91 +187,242 @@ function StudentForm({
   onCancel,
   onSubmit,
 }: StudentFormProps) {
+  const isEditMode = Boolean(student)
   const {
+    control,
     register,
     handleSubmit,
     reset,
+    setValue,
     formState: { errors },
   } = useForm<StudentFormValues>({
-    resolver: zodResolver(studentSchema),
-    defaultValues: getDefaultValues(student),
+    resolver: zodResolver(buildStudentFormSchema(isEditMode)),
+    defaultValues: getDefaultValues(student, linkedUser),
+  })
+
+  const createLoginAccount = useWatch({
+    control,
+    name: 'createLoginAccount',
+  })
+  const studentEmail = useWatch({
+    control,
+    name: 'email',
+  })
+  const loginEmail = useWatch({
+    control,
+    name: 'login.email',
   })
 
   useEffect(() => {
-    reset(getDefaultValues(student))
-  }, [reset, student])
+    reset(getDefaultValues(student, linkedUser))
+  }, [linkedUser, reset, student])
+
+  useEffect(() => {
+    if (isEditMode || !createLoginAccount || !studentEmail.trim() || loginEmail.trim()) {
+      return
+    }
+
+    setValue('login.email', studentEmail.trim(), {
+      shouldDirty: true,
+      shouldValidate: false,
+    })
+  }, [createLoginAccount, isEditMode, loginEmail, setValue, studentEmail])
 
   return (
     <form className="space-y-5" onSubmit={handleSubmit(onSubmit)}>
-      <div className="grid gap-5 md:grid-cols-2">
-        <InputField
-          label="First name"
-          placeholder="Aarav"
-          error={errors.firstName?.message}
-          {...register('firstName')}
-        />
-        <InputField
-          label="Last name"
-          placeholder="Sharma"
-          error={errors.lastName?.message}
-          {...register('lastName')}
-        />
+      <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="mb-5 space-y-1">
+          <h3 className="text-base font-semibold text-ink-950">Basic Details</h3>
+          <p className="text-sm text-ink-500">
+            Core student identity and contact information.
+          </p>
+        </div>
+
+        <div className="space-y-5">
+          <div className="grid gap-5 md:grid-cols-2">
+            <InputField
+              label="First name"
+              placeholder="Amit"
+              error={errors.firstName?.message}
+              {...register('firstName')}
+            />
+            <InputField
+              label="Last name"
+              placeholder="Kumar"
+              error={errors.lastName?.message}
+              {...register('lastName')}
+            />
+          </div>
+
+          <div className="grid gap-5 md:grid-cols-2">
+            <InputField
+              label="Roll number"
+              placeholder="BCA001"
+              error={errors.rollNumber?.message}
+              {...register('rollNumber')}
+            />
+            <SelectField
+              label="Gender"
+              options={genderOptions}
+              error={errors.gender?.message}
+              {...register('gender')}
+            />
+          </div>
+
+          <div className="grid gap-5 md:grid-cols-2">
+            <InputField
+              label="Email"
+              type="email"
+              placeholder="amit@example.com"
+              error={errors.email?.message}
+              {...register('email')}
+            />
+            <InputField
+              label="Phone"
+              placeholder="9999999999"
+              error={errors.phone?.message}
+              {...register('phone')}
+            />
+          </div>
+        </div>
       </div>
 
-      <div className="grid gap-5 md:grid-cols-2">
-        <InputField
-          label="Roll number"
-          placeholder="CS-2025-001"
-          error={errors.rollNumber?.message}
-          {...register('rollNumber')}
-        />
-        <SelectField
-          label="Gender"
-          options={genderOptions}
-          error={errors.gender?.message}
-          {...register('gender')}
-        />
+      <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="mb-5 space-y-1">
+          <h3 className="text-base font-semibold text-ink-950">Academic Details</h3>
+          <p className="text-sm text-ink-500">
+            Group mapping and operational status used by attendance modules.
+          </p>
+        </div>
+
+        <div className="grid gap-5 md:grid-cols-2">
+          <SelectField
+            label="Class group"
+            options={classGroupOptions}
+            placeholder="Select class group"
+            error={errors.classGroupId?.message}
+            {...register('classGroupId')}
+          />
+          <SelectField
+            label="Status"
+            options={studentStatusOptions}
+            error={errors.status?.message}
+            {...register('status')}
+          />
+        </div>
       </div>
 
-      <div className="grid gap-5 md:grid-cols-2">
-        <InputField
-          label="Email"
-          type="email"
-          placeholder="student@example.com"
-          hint="If a linked student user is selected, this should match that account email."
-          error={errors.email?.message}
-          {...register('email')}
-        />
-        <InputField
-          label="Phone"
-          placeholder="+91 9876543210"
-          error={errors.phone?.message}
-          {...register('phone')}
-        />
-      </div>
+      <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+          <div className="space-y-1">
+            <h3 className="text-base font-semibold text-ink-950">Login Account Setup</h3>
+            <p className="text-sm text-ink-500">
+              Enable student portal access from the same student creation flow.
+            </p>
+          </div>
+          {isEditMode ? (
+            <StatusBadge
+              label={
+                linkedUser
+                  ? linkedUser.isActive
+                    ? 'Login Enabled'
+                    : 'Login Disabled'
+                  : 'No Login Account'
+              }
+              tone={
+                linkedUser ? (linkedUser.isActive ? 'success' : 'warning') : 'neutral'
+              }
+            />
+          ) : null}
+        </div>
 
-      <SelectField
-        label="Linked user account"
-        options={userOptions}
-        placeholder="Optional student user link"
-        error={errors.userId?.message}
-        {...register('userId')}
-      />
+        {isEditMode ? (
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-ink-600">
+            {linkedUser ? (
+              <div className="space-y-1">
+                <p className="font-medium text-ink-900">{linkedUser.fullName}</p>
+                <p>{linkedUser.email}</p>
+                <p className="text-xs text-ink-500">
+                  Manage password and active status from the Users module.
+                </p>
+              </div>
+            ) : (
+              <p>No linked login account is attached to this student yet.</p>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-ink-700">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200"
+                {...register('createLoginAccount')}
+              />
+              <span className="space-y-1">
+                <span className="block font-medium text-ink-950">
+                  Create linked student login account
+                </span>
+                <span className="block text-ink-500">
+                  If enabled, the student can sign in using the same email and a
+                  generated user account.
+                </span>
+              </span>
+            </label>
 
-      <div className="grid gap-5 md:grid-cols-2">
-        <SelectField
-          label="Class group"
-          options={classGroupOptions}
-          placeholder="Select class group"
-          error={errors.classGroupId?.message}
-          {...register('classGroupId')}
-        />
-        <SelectField
-          label="Status"
-          options={studentStatusOptions}
-          error={errors.status?.message}
-          {...register('status')}
-        />
+            {createLoginAccount ? (
+              <div className="rounded-2xl border border-brand-100 bg-brand-50/40 p-4">
+                <div className="mb-4 space-y-1">
+                  <p className="text-sm font-semibold text-ink-950">Login Account Setup</p>
+                  <p className="text-sm text-ink-500">
+                    These credentials will create the linked student user account.
+                  </p>
+                </div>
+
+                <div className="grid gap-5 md:grid-cols-2">
+                  <InputField
+                    label="Login email"
+                    type="email"
+                    placeholder="amit@example.com"
+                    error={errors.login?.email?.message}
+                    {...register('login.email')}
+                  />
+                  <InputField
+                    label="Temporary password"
+                    type="password"
+                    placeholder="Student@123"
+                    error={errors.login?.password?.message}
+                    {...register('login.password')}
+                  />
+                </div>
+
+                <label className="mt-4 flex items-start gap-3 rounded-2xl border border-white/70 bg-white/80 px-4 py-4 text-sm text-ink-700">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200"
+                    {...register('login.isActive')}
+                  />
+                  <span className="space-y-1">
+                    <span className="block font-medium text-ink-950">
+                      Keep login account active
+                    </span>
+                    <span className="block text-ink-500">
+                      Disable this if the login should be created but not usable yet.
+                    </span>
+                  </span>
+                </label>
+              </div>
+            ) : (
+              <SelectField
+                label="Link existing student login"
+                options={userOptions}
+                placeholder="Optional existing student user"
+                hint="Leave blank to create only the student record."
+                error={errors.userId?.message}
+                {...register('userId')}
+              />
+            )}
+          </div>
+        )}
       </div>
 
       {referenceError ? <ErrorMessage message={referenceError} /> : null}
@@ -211,6 +447,7 @@ function StudentsPage() {
   const [editingStudent, setEditingStudent] = useState<Student | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Student | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
+  const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const debouncedSearch = useDebounce(search)
 
   const studentsQuery = useQuery({
@@ -308,25 +545,40 @@ function StudentsPage() {
         email: values.email.trim() || undefined,
         phone: values.phone.trim() || undefined,
         gender: (values.gender || undefined) as StudentGender | undefined,
-        userId: values.userId?.trim() ? values.userId : undefined,
         classGroupId: values.classGroupId,
         status: values.status,
       }
 
       if (editingStudent) {
-        const payload: UpdateStudentInput = {
-          ...basePayload,
-          userId: values.userId?.trim() ? values.userId : null,
-        }
-
+        const payload: UpdateStudentInput = basePayload
         return studentsApi.updateStudent(editingStudent.id, payload)
       }
 
-      const payload: CreateStudentInput = basePayload
+      const payload: CreateStudentPayload = {
+        ...basePayload,
+        createLoginAccount: values.createLoginAccount,
+      }
+
+      if (values.createLoginAccount) {
+        payload.login = {
+          email: values.login.email.trim(),
+          password: values.login.password,
+          isActive: values.login.isActive,
+        }
+      } else if (values.userId.trim()) {
+        payload.userId = values.userId.trim()
+      }
+
       return studentsApi.createStudent(payload)
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['students'] })
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['students'] }),
+        queryClient.invalidateQueries({ queryKey: ['users'] }),
+      ])
+      setSuccessMessage(
+        editingStudent ? 'Student updated successfully.' : 'Student created successfully.',
+      )
       setSheetOpen(false)
       setEditingStudent(null)
       setFormError(null)
@@ -340,6 +592,7 @@ function StudentsPage() {
     mutationFn: (id: string) => studentsApi.deleteStudent(id),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['students'] })
+      setSuccessMessage('Student deleted successfully.')
       setDeleteTarget(null)
     },
   })
@@ -393,15 +646,29 @@ function StudentsPage() {
         ),
       },
       {
-        key: 'linkedUser',
-        header: 'Linked Account',
+        key: 'login',
+        header: 'Login',
         render: (student) => {
           const linkedUser = userMap.get(student.userId ?? '')
 
           return (
-            <span className="text-sm text-ink-600">
-              {linkedUser ? linkedUser.fullName : 'Not linked'}
-            </span>
+            <div className="space-y-2">
+              <StatusBadge
+                label={
+                  linkedUser
+                    ? linkedUser.isActive
+                      ? 'Login Enabled'
+                      : 'Login Disabled'
+                    : 'No Login Account'
+                }
+                tone={
+                  linkedUser ? (linkedUser.isActive ? 'success' : 'warning') : 'neutral'
+                }
+              />
+              <p className="text-xs text-ink-500">
+                {linkedUser?.email ?? 'Student-only record'}
+              </p>
+            </div>
           )
         },
       },
@@ -415,6 +682,7 @@ function StudentsPage() {
             onEdit={() => {
               setEditingStudent(student)
               setFormError(null)
+              setSuccessMessage(null)
               setSheetOpen(true)
             }}
             onDelete={() => setDeleteTarget(student)}
@@ -426,6 +694,7 @@ function StudentsPage() {
   )
 
   const referencesLoading = studentUsersQuery.isLoading || classGroupsQuery.isLoading
+  const activeLinkedUser = editingStudent ? userMap.get(editingStudent.userId ?? '') : null
 
   return (
     <div className="space-y-6">
@@ -436,13 +705,14 @@ function StudentsPage() {
         ]}
         eyebrow="Academics"
         title="Students"
-        description="Maintain student records, optional linked login accounts, and class group mapping."
+        description="Create student records and optionally provision linked student login accounts in the same flow."
         actions={
           <button
             type="button"
             onClick={() => {
               setEditingStudent(null)
               setFormError(null)
+              setSuccessMessage(null)
               setSheetOpen(true)
             }}
             className="inline-flex items-center gap-2 rounded-2xl bg-ink-950 px-4 py-3 text-sm font-medium text-white transition hover:bg-ink-800"
@@ -453,12 +723,18 @@ function StudentsPage() {
         }
       />
 
+      {successMessage ? (
+        <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          {successMessage}
+        </div>
+      ) : null}
+
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_220px_260px]">
         <SearchInput
           value={search}
           onChange={(event) => setSearch(event.target.value)}
           onClear={() => setSearch('')}
-          placeholder="Search by name, roll number, email, or remarks"
+          placeholder="Search by name, roll number, or email"
         />
         <SelectField
           label="Status"
@@ -497,7 +773,7 @@ function StudentsPage() {
       <SidePanel
         open={sheetOpen}
         title={editingStudent ? 'Edit student' : 'Create student'}
-        description="Student records drive attendance history, analytics, and the linked student portal."
+        description="Students can be created as records only or with a linked portal login in the same admin flow."
         onClose={() => {
           setSheetOpen(false)
           setEditingStudent(null)
@@ -509,6 +785,7 @@ function StudentsPage() {
         ) : (
           <StudentForm
             student={editingStudent}
+            linkedUser={activeLinkedUser}
             userOptions={userOptions}
             classGroupOptions={classGroupOptions}
             submitError={formError}

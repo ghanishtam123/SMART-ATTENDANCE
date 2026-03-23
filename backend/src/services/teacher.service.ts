@@ -7,13 +7,16 @@ import SubjectModel from '../models/Subject.model';
 import TeacherProfileModel, {
   TeacherProfile,
 } from '../models/TeacherProfile.model';
-import UserModel from '../models/User.model';
-import { PaginatedResult } from '../types/common.types';
+import UserModel, { UserDocument } from '../models/User.model';
+import { AuthenticatedUser } from '../types/auth.types';
+import { PaginatedResult, RequestAuditContext } from '../types/common.types';
 import { AppError } from '../utils/AppError';
 import {
   buildPaginationMeta,
   getPaginationOptions,
 } from '../utils/pagination';
+import { auditService } from './audit.service';
+import { createManagedUserAccount } from './userAccount.service';
 
 interface TeacherListQuery {
   page?: number;
@@ -24,6 +27,13 @@ interface TeacherListQuery {
   userId?: string;
 }
 
+interface TeacherLoginPayload {
+  fullName: string;
+  email: string;
+  password: string;
+  isActive?: boolean;
+}
+
 interface TeacherProfilePayload {
   userId?: string;
   employeeId?: string;
@@ -31,6 +41,8 @@ interface TeacherProfilePayload {
   designation?: string;
   subjectsTaught?: string[];
   assignedClassGroups?: string[];
+  createLoginAccount?: boolean;
+  login?: TeacherLoginPayload;
 }
 
 const dedupeIds = (ids: string[] | undefined): string[] | undefined => {
@@ -80,6 +92,15 @@ const ensureReferenceIdsExist = async (
 };
 
 const normalizeTeacherProfilePayload = (payload: TeacherProfilePayload) => {
+  const normalizedLogin = payload.login
+    ? {
+        fullName: payload.login.fullName.trim(),
+        email: payload.login.email.trim().toLowerCase(),
+        password: payload.login.password,
+        isActive: payload.login.isActive,
+      }
+    : undefined;
+
   return {
     ...payload,
     employeeId: payload.employeeId?.trim().toUpperCase(),
@@ -87,11 +108,16 @@ const normalizeTeacherProfilePayload = (payload: TeacherProfilePayload) => {
     designation: payload.designation?.trim(),
     subjectsTaught: dedupeIds(payload.subjectsTaught),
     assignedClassGroups: dedupeIds(payload.assignedClassGroups),
+    createLoginAccount: payload.createLoginAccount === true,
+    login: normalizedLogin,
   };
 };
 
 const assertTeacherProfileDuplicates = async (
-  payload: ReturnType<typeof normalizeTeacherProfilePayload>,
+  payload: {
+    employeeId?: string;
+    userId?: string;
+  },
   excludeId?: string,
 ): Promise<void> => {
   if (payload.employeeId) {
@@ -135,6 +161,18 @@ const getTeacherProfileOrThrow = async (id: string) => {
   }
 
   return teacherProfile;
+};
+
+const deleteUserForRollback = async (user: UserDocument | null): Promise<void> => {
+  if (!user) {
+    return;
+  }
+
+  try {
+    await user.deleteOne();
+  } catch {
+    // Best-effort rollback when the profile write fails after login creation.
+  }
 };
 
 export const teacherService = {
@@ -185,11 +223,18 @@ export const teacherService = {
     return teacherProfile.toJSON();
   },
 
-  createTeacherProfile: async (payload: TeacherProfilePayload): Promise<unknown> => {
+  createTeacherProfile: async (
+    payload: TeacherProfilePayload,
+    currentUser: AuthenticatedUser,
+    auditContext?: RequestAuditContext,
+  ): Promise<unknown> => {
     const normalizedPayload = normalizeTeacherProfilePayload(payload);
+    let createdUser: UserDocument | null = null;
 
-    await ensureTeacherUserExists(normalizedPayload.userId!);
-    await assertTeacherProfileDuplicates(normalizedPayload);
+    await assertTeacherProfileDuplicates({
+      employeeId: normalizedPayload.employeeId,
+      userId: normalizedPayload.userId,
+    });
     await ensureReferenceIdsExist(
       normalizedPayload.subjectsTaught,
       async (ids) => SubjectModel.countDocuments({ _id: { $in: ids } }),
@@ -201,30 +246,97 @@ export const teacherService = {
       'One or more class group ids are invalid.',
     );
 
-    const teacherProfile = await TeacherProfileModel.create({
-      userId: normalizedPayload.userId,
-      employeeId: normalizedPayload.employeeId,
-      department: normalizedPayload.department,
-      designation: normalizedPayload.designation,
-      subjectsTaught: normalizedPayload.subjectsTaught ?? [],
-      assignedClassGroups: normalizedPayload.assignedClassGroups ?? [],
-    });
+    try {
+      let teacherUserId = normalizedPayload.userId;
 
-    return teacherProfile.toJSON();
+      if (teacherUserId) {
+        await ensureTeacherUserExists(teacherUserId);
+      }
+
+      if (normalizedPayload.createLoginAccount) {
+        if (!normalizedPayload.login) {
+          throw new AppError(
+            'Login details are required when createLoginAccount is true.',
+            HTTP_STATUS.BAD_REQUEST,
+          );
+        }
+
+        createdUser = await createManagedUserAccount(
+          {
+            fullName: normalizedPayload.login!.fullName,
+            email: normalizedPayload.login!.email,
+            password: normalizedPayload.login!.password,
+            role: UserRole.TEACHER,
+            isActive: normalizedPayload.login?.isActive,
+          },
+          {
+            currentUser,
+            auditContext,
+          },
+        );
+        teacherUserId = createdUser.id;
+      }
+
+      if (!teacherUserId) {
+        throw new AppError(
+          'Teacher profile must be linked to a teacher user.',
+          HTTP_STATUS.BAD_REQUEST,
+        );
+      }
+
+      const teacherProfile = await TeacherProfileModel.create({
+        userId: teacherUserId,
+        employeeId: normalizedPayload.employeeId,
+        department: normalizedPayload.department,
+        designation: normalizedPayload.designation,
+        subjectsTaught: normalizedPayload.subjectsTaught ?? [],
+        assignedClassGroups: normalizedPayload.assignedClassGroups ?? [],
+      });
+
+      await auditService.logAction({
+        ...auditContext,
+        action: 'teacher.create',
+        entityType: 'teacherProfile',
+        entityId: teacherProfile.id,
+        metadata: {
+          employeeId: teacherProfile.employeeId,
+          userId: String(teacherProfile.userId),
+          subjectCount: teacherProfile.subjectsTaught.length,
+          assignedClassGroupCount: teacherProfile.assignedClassGroups.length,
+          loginAccountCreated: Boolean(createdUser),
+        },
+      });
+
+      return teacherProfile.toJSON();
+    } catch (error) {
+      await deleteUserForRollback(createdUser);
+      throw error;
+    }
   },
 
   updateTeacherProfile: async (
     id: string,
     payload: TeacherProfilePayload,
+    auditContext?: RequestAuditContext,
   ): Promise<unknown> => {
     const teacherProfile = await getTeacherProfileOrThrow(id);
     const normalizedPayload = normalizeTeacherProfilePayload(payload);
+    const updatedFieldNames = Object.keys(payload).filter((fieldName) => {
+      const value = payload[fieldName as keyof TeacherProfilePayload];
+      return value !== undefined;
+    });
 
     if (normalizedPayload.userId) {
       await ensureTeacherUserExists(normalizedPayload.userId);
     }
 
-    await assertTeacherProfileDuplicates(normalizedPayload, id);
+    await assertTeacherProfileDuplicates(
+      {
+        employeeId: normalizedPayload.employeeId,
+        userId: normalizedPayload.userId,
+      },
+      id,
+    );
     await ensureReferenceIdsExist(
       normalizedPayload.subjectsTaught,
       async (ids) => SubjectModel.countDocuments({ _id: { $in: ids } }),
@@ -236,15 +348,45 @@ export const teacherService = {
       'One or more class group ids are invalid.',
     );
 
-    Object.assign(teacherProfile, normalizedPayload);
+    const {
+      createLoginAccount: _createLoginAccount,
+      login: _login,
+      ...profileUpdates
+    } = normalizedPayload;
+
+    Object.assign(teacherProfile, profileUpdates);
     await teacherProfile.save();
+    await auditService.logAction({
+      ...auditContext,
+      action: 'teacher.update',
+      entityType: 'teacherProfile',
+      entityId: teacherProfile.id,
+      metadata: {
+        updatedFields: updatedFieldNames,
+        employeeId: teacherProfile.employeeId,
+        userId: String(teacherProfile.userId),
+      },
+    });
 
     return teacherProfile.toJSON();
   },
 
-  deleteTeacherProfile: async (id: string): Promise<unknown> => {
+  deleteTeacherProfile: async (
+    id: string,
+    auditContext?: RequestAuditContext,
+  ): Promise<unknown> => {
     const teacherProfile = await getTeacherProfileOrThrow(id);
     await teacherProfile.deleteOne();
+    await auditService.logAction({
+      ...auditContext,
+      action: 'teacher.delete',
+      entityType: 'teacherProfile',
+      entityId: teacherProfile.id,
+      metadata: {
+        employeeId: teacherProfile.employeeId,
+        userId: String(teacherProfile.userId),
+      },
+    });
     return teacherProfile.toJSON();
   },
 };

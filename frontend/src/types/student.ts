@@ -41,7 +41,13 @@ export interface StudentListQuery extends PaginationQuery {
   hasEmail?: boolean
 }
 
-export interface CreateStudentInput {
+export interface StudentLoginDetails {
+  email: string
+  password: string
+  isActive?: boolean
+}
+
+export interface CreateStudentPayload {
   firstName: string
   lastName: string
   rollNumber: string
@@ -52,7 +58,11 @@ export interface CreateStudentInput {
   classGroupId: string
   status?: StudentStatus
   faceProfileId?: string
+  createLoginAccount?: boolean
+  login?: StudentLoginDetails
 }
+
+export type CreateStudentInput = CreateStudentPayload
 
 export interface UpdateStudentInput {
   firstName?: string

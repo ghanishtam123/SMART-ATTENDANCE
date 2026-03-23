@@ -11,13 +11,24 @@ import StudentModel from '../models/Student.model';
 import UserModel, { UserDocument } from '../models/User.model';
 import {
   AuthenticatedUser,
+  RegisterInput,
   SafeUser,
 } from '../types/auth.types';
+import { RequestAuditContext } from '../types/common.types';
 import { AppError } from '../utils/AppError';
+import { auditService } from './audit.service';
 
 interface UserCreationContext {
   currentUser?: AuthenticatedUser;
   bootstrapSecret?: string;
+}
+
+interface ManagedUserCreationContext extends UserCreationContext {
+  auditContext?: RequestAuditContext;
+}
+
+export interface ManagedRegisterInput extends RegisterInput {
+  isActive?: boolean;
 }
 
 export const getManageableUserRoles = (role: UserRole): UserRole[] => {
@@ -134,4 +145,53 @@ export const assertUserCreationAllowed = async (
   );
 
   return new Types.ObjectId(context.currentUser.userId);
+};
+
+export const createManagedUserAccount = async (
+  payload: ManagedRegisterInput,
+  context: ManagedUserCreationContext,
+): Promise<UserDocument> => {
+  const normalizedEmail = payload.email.trim().toLowerCase();
+
+  const existingUser = await UserModel.findOne({ email: normalizedEmail })
+    .select('_id')
+    .lean();
+
+  if (existingUser) {
+    throw new AppError(
+      'A user with this email already exists.',
+      HTTP_STATUS.CONFLICT,
+    );
+  }
+
+  const createdBy = await assertUserCreationAllowed(
+    payload.role,
+    context,
+  );
+
+  const user = new UserModel({
+    fullName: payload.fullName.trim(),
+    email: normalizedEmail,
+    password: payload.password,
+    role: payload.role,
+    isActive: payload.isActive ?? true,
+    createdBy,
+  });
+
+  await user.save();
+  await auditService.logAction({
+    ...context.auditContext,
+    actorUserId: context.currentUser?.userId ?? null,
+    action: 'user.create',
+    entityType: 'user',
+    entityId: user.id,
+    metadata: {
+      email: user.email,
+      role: user.role,
+      isActive: user.isActive,
+      bootstrapCreated: !context.currentUser,
+    },
+  });
+
+  return user;
 };

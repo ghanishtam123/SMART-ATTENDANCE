@@ -5,7 +5,8 @@ import { UserRole } from '../constants/roles';
 import { StudentStatus } from '../constants/student';
 import ClassGroupModel from '../models/ClassGroup.model';
 import StudentModel, { Student } from '../models/Student.model';
-import UserModel from '../models/User.model';
+import UserModel, { UserDocument } from '../models/User.model';
+import { AuthenticatedUser } from '../types/auth.types';
 import { PaginatedResult, RequestAuditContext } from '../types/common.types';
 import { AppError } from '../utils/AppError';
 import {
@@ -13,6 +14,7 @@ import {
   getPaginationOptions,
 } from '../utils/pagination';
 import { auditService } from './audit.service';
+import { createManagedUserAccount } from './userAccount.service';
 
 interface StudentListQuery {
   page?: number;
@@ -21,6 +23,12 @@ interface StudentListQuery {
   classGroupId?: string;
   status?: StudentStatus;
   hasEmail?: boolean;
+}
+
+interface StudentLoginPayload {
+  email: string;
+  password: string;
+  isActive?: boolean;
 }
 
 interface StudentPayload {
@@ -34,6 +42,13 @@ interface StudentPayload {
   classGroupId?: string;
   status?: StudentStatus;
   faceProfileId?: string | null;
+  createLoginAccount?: boolean;
+  login?: StudentLoginPayload;
+}
+
+interface LinkedStudentUser {
+  id: string;
+  email: string;
 }
 
 const ensureClassGroupExists = async (classGroupId: string): Promise<void> => {
@@ -45,6 +60,14 @@ const ensureClassGroupExists = async (classGroupId: string): Promise<void> => {
 };
 
 const normalizeStudentPayload = (payload: StudentPayload) => {
+  const normalizedLogin = payload.login
+    ? {
+        email: payload.login.email.trim().toLowerCase(),
+        password: payload.login.password,
+        isActive: payload.login.isActive,
+      }
+    : undefined;
+
   return {
     ...payload,
     firstName: payload.firstName?.trim(),
@@ -70,10 +93,19 @@ const normalizeStudentPayload = (payload: StudentPayload) => {
       payload.faceProfileId === undefined || payload.faceProfileId === ''
         ? undefined
         : payload.faceProfileId,
+    createLoginAccount: payload.createLoginAccount === true,
+    login: normalizedLogin,
   };
 };
 
-const getStudentLinkedUser = async (userId: string) => {
+const buildStudentFullName = (
+  firstName?: string,
+  lastName?: string,
+): string => {
+  return [firstName, lastName].filter(Boolean).join(' ').trim();
+};
+
+const getStudentLinkedUser = async (userId: string): Promise<LinkedStudentUser> => {
   const user = await UserModel.findById(userId)
     .select('_id role email')
     .lean();
@@ -96,7 +128,7 @@ const getStudentLinkedUser = async (userId: string) => {
 };
 
 const assertStudentDuplicates = async (
-  payload: ReturnType<typeof normalizeStudentPayload>,
+  payload: Pick<Student, 'rollNumber' | 'email'> & { userId?: string | null },
   excludeId?: string,
 ): Promise<void> => {
   if (payload.rollNumber) {
@@ -168,6 +200,54 @@ const assignStudentField = (
   }
 };
 
+const assertStudentEmailMatchesLinkedUser = (
+  studentEmail: string | null | undefined,
+  linkedUser: LinkedStudentUser | null,
+) => {
+  if (
+    linkedUser &&
+    studentEmail !== undefined &&
+    studentEmail !== null &&
+    studentEmail !== linkedUser.email
+  ) {
+    throw new AppError(
+      'Student email must match the linked student user email.',
+      HTTP_STATUS.BAD_REQUEST,
+    );
+  }
+};
+
+const resolveEffectiveLinkedStudentUser = async (
+  student: Awaited<ReturnType<typeof getStudentOrThrow>>,
+  payload: ReturnType<typeof normalizeStudentPayload>,
+): Promise<LinkedStudentUser | null> => {
+  if (payload.userId === null) {
+    return null;
+  }
+
+  if (payload.userId) {
+    return getStudentLinkedUser(payload.userId);
+  }
+
+  if (student.userId) {
+    return getStudentLinkedUser(String(student.userId));
+  }
+
+  return null;
+};
+
+const deleteUserForRollback = async (user: UserDocument | null): Promise<void> => {
+  if (!user) {
+    return;
+  }
+
+  try {
+    await user.deleteOne();
+  } catch {
+    // Best-effort rollback when the domain record fails after login creation.
+  }
+};
+
 export const studentService = {
   listStudents: async (
     query: StudentListQuery,
@@ -223,56 +303,91 @@ export const studentService = {
 
   createStudent: async (
     payload: StudentPayload,
+    currentUser: AuthenticatedUser,
     auditContext?: RequestAuditContext,
   ): Promise<unknown> => {
     const normalizedPayload = normalizeStudentPayload(payload);
-    const linkedUser = normalizedPayload.userId
-      ? await getStudentLinkedUser(normalizedPayload.userId)
-      : null;
-
-    if (
-      linkedUser &&
-      normalizedPayload.email !== undefined &&
-      normalizedPayload.email !== null &&
-      normalizedPayload.email !== linkedUser.email
-    ) {
-      throw new AppError(
-        'Student email must match the linked student user email.',
-        HTTP_STATUS.BAD_REQUEST,
-      );
-    }
+    const derivedStudentEmail =
+      normalizedPayload.login?.email ?? normalizedPayload.email ?? null;
+    let createdUser: UserDocument | null = null;
 
     await ensureClassGroupExists(normalizedPayload.classGroupId!);
     await assertStudentDuplicates({
-      ...normalizedPayload,
-      email: linkedUser?.email ?? normalizedPayload.email,
+      rollNumber: normalizedPayload.rollNumber!,
+      email: derivedStudentEmail,
+      userId: normalizedPayload.userId,
     });
 
-    const student = await StudentModel.create({
-      firstName: normalizedPayload.firstName,
-      lastName: normalizedPayload.lastName,
-      rollNumber: normalizedPayload.rollNumber,
-      email: linkedUser?.email ?? normalizedPayload.email ?? null,
-      phone: normalizedPayload.phone ?? null,
-      gender: normalizedPayload.gender ?? null,
-      userId: normalizedPayload.userId ?? null,
-      classGroupId: normalizedPayload.classGroupId,
-      status: normalizedPayload.status ?? StudentStatus.ACTIVE,
-      faceProfileId: normalizedPayload.faceProfileId ?? null,
-    });
-    await auditService.logAction({
-      ...auditContext,
-      action: 'student.create',
-      entityType: 'student',
-      entityId: student.id,
-      metadata: {
-        rollNumber: student.rollNumber,
-        classGroupId: String(student.classGroupId),
-        status: student.status,
-      },
-    });
+    try {
+      let linkedUser = normalizedPayload.userId
+        ? await getStudentLinkedUser(normalizedPayload.userId)
+        : null;
 
-    return student.toJSON();
+      if (normalizedPayload.createLoginAccount) {
+        if (!normalizedPayload.login) {
+          throw new AppError(
+            'Login details are required when createLoginAccount is true.',
+            HTTP_STATUS.BAD_REQUEST,
+          );
+        }
+
+        createdUser = await createManagedUserAccount(
+          {
+            fullName: buildStudentFullName(
+              normalizedPayload.firstName,
+              normalizedPayload.lastName,
+            ),
+            email: normalizedPayload.login!.email,
+            password: normalizedPayload.login!.password,
+            role: UserRole.STUDENT,
+            isActive: normalizedPayload.login?.isActive,
+          },
+          {
+            currentUser,
+            auditContext,
+          },
+        );
+
+        linkedUser = {
+          id: createdUser.id,
+          email: createdUser.email,
+        };
+      }
+
+      assertStudentEmailMatchesLinkedUser(normalizedPayload.email, linkedUser);
+
+      const student = await StudentModel.create({
+        firstName: normalizedPayload.firstName,
+        lastName: normalizedPayload.lastName,
+        rollNumber: normalizedPayload.rollNumber,
+        email: linkedUser?.email ?? normalizedPayload.email ?? null,
+        phone: normalizedPayload.phone ?? null,
+        gender: normalizedPayload.gender ?? null,
+        userId: linkedUser?.id ?? normalizedPayload.userId ?? null,
+        classGroupId: normalizedPayload.classGroupId,
+        status: normalizedPayload.status ?? StudentStatus.ACTIVE,
+        faceProfileId: normalizedPayload.faceProfileId ?? null,
+      });
+
+      await auditService.logAction({
+        ...auditContext,
+        action: 'student.create',
+        entityType: 'student',
+        entityId: student.id,
+        metadata: {
+          rollNumber: student.rollNumber,
+          classGroupId: String(student.classGroupId),
+          status: student.status,
+          userId: student.userId ? String(student.userId) : null,
+          loginAccountCreated: Boolean(createdUser),
+        },
+      });
+
+      return student.toJSON();
+    } catch (error) {
+      await deleteUserForRollback(createdUser);
+      throw error;
+    }
   },
 
   updateStudent: async (
@@ -282,10 +397,10 @@ export const studentService = {
   ): Promise<unknown> => {
     const student = await getStudentOrThrow(id);
     const normalizedPayload = normalizeStudentPayload(payload);
-    const linkedUser =
-      normalizedPayload.userId && normalizedPayload.userId !== null
-        ? await getStudentLinkedUser(normalizedPayload.userId)
-        : null;
+    const effectiveLinkedUser = await resolveEffectiveLinkedStudentUser(
+      student,
+      normalizedPayload,
+    );
     const updatedFieldNames = Object.keys(payload).filter((fieldName) => {
       const value = payload[fieldName as keyof StudentPayload];
       return value !== undefined;
@@ -295,22 +410,19 @@ export const studentService = {
       await ensureClassGroupExists(normalizedPayload.classGroupId);
     }
 
-    if (
-      linkedUser &&
-      normalizedPayload.email !== undefined &&
-      normalizedPayload.email !== null &&
-      normalizedPayload.email !== linkedUser.email
-    ) {
-      throw new AppError(
-        'Student email must match the linked student user email.',
-        HTTP_STATUS.BAD_REQUEST,
-      );
-    }
+    assertStudentEmailMatchesLinkedUser(
+      normalizedPayload.email,
+      effectiveLinkedUser,
+    );
 
     await assertStudentDuplicates(
       {
-        ...normalizedPayload,
-        email: linkedUser?.email ?? normalizedPayload.email,
+        rollNumber: normalizedPayload.rollNumber ?? student.rollNumber,
+        email: effectiveLinkedUser?.email ?? normalizedPayload.email ?? student.email,
+        userId:
+          normalizedPayload.userId === null
+            ? null
+            : effectiveLinkedUser?.id ?? normalizedPayload.userId,
       },
       id,
     );
@@ -321,7 +433,7 @@ export const studentService = {
     assignStudentField(
       student,
       'email',
-      linkedUser?.email ?? normalizedPayload.email,
+      effectiveLinkedUser?.email ?? normalizedPayload.email,
     );
     assignStudentField(student, 'phone', normalizedPayload.phone);
     assignStudentField(student, 'gender', normalizedPayload.gender);
@@ -340,6 +452,7 @@ export const studentService = {
         rollNumber: student.rollNumber,
         classGroupId: String(student.classGroupId),
         status: student.status,
+        userId: student.userId ? String(student.userId) : null,
       },
     });
 

@@ -1,7 +1,7 @@
 import client, { getApiData, getPaginatedApiData } from './client'
 import type { ApiResponse, PaginationMeta } from '../types/common'
 import type {
-  CreateTeacherInput,
+  CreateTeacherPayload,
   TeacherListQuery,
   TeacherProfile,
   UpdateTeacherInput,
@@ -21,7 +21,7 @@ export const teachersApi = {
     return getApiData(response)
   },
 
-  createTeacher: async (payload: CreateTeacherInput) => {
+  createTeacher: async (payload: CreateTeacherPayload) => {
     const response = await client.post<ApiResponse<TeacherProfile>>(
       '/teachers',
       payload,

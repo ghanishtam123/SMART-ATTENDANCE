@@ -104,7 +104,6 @@ const studentSchema = new Schema<Student>(
 );
 
 studentSchema.index({ classGroupId: 1, status: 1 });
-studentSchema.index({ userId: 1 }, { unique: true, sparse: true });
 
 const StudentModel = models.Student || model<Student>('Student', studentSchema);
 

@@ -18,13 +18,31 @@ export interface TeacherListQuery extends PaginationQuery {
   userId?: string
 }
 
-export interface CreateTeacherInput {
-  userId: string
+export interface TeacherLoginDetails {
+  fullName: string
+  email: string
+  password: string
+  isActive?: boolean
+}
+
+export interface CreateTeacherPayload {
+  userId?: string
   employeeId: string
   department: string
   designation: string
   subjectsTaught?: string[]
   assignedClassGroups?: string[]
+  createLoginAccount?: boolean
+  login?: TeacherLoginDetails
 }
 
-export type UpdateTeacherInput = Partial<CreateTeacherInput>
+export type CreateTeacherInput = CreateTeacherPayload
+
+export interface UpdateTeacherInput {
+  userId?: string
+  employeeId?: string
+  department?: string
+  designation?: string
+  subjectsTaught?: string[]
+  assignedClassGroups?: string[]
+}

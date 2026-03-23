@@ -17,7 +17,7 @@ import { RequestAuditContext } from '../types/common.types';
 import { AppError } from '../utils/AppError';
 import { auditService } from './audit.service';
 import {
-  assertUserCreationAllowed,
+  createManagedUserAccount,
   resolveLinkedStudentId,
   sanitizeUser,
 } from './userAccount.service';
@@ -78,45 +78,7 @@ export const authService = {
     payload: RegisterInput,
     context: RegisterContext,
   ): Promise<{ user: SafeUser }> => {
-    const normalizedEmail = payload.email.trim().toLowerCase();
-
-    const existingUser = await UserModel.findOne({ email: normalizedEmail })
-      .select('_id')
-      .lean();
-
-    if (existingUser) {
-      throw new AppError(
-        'A user with this email already exists.',
-        HTTP_STATUS.CONFLICT,
-      );
-    }
-
-    const createdBy = await assertUserCreationAllowed(
-      payload.role,
-      context,
-    );
-
-    const user = new UserModel({
-      fullName: payload.fullName.trim(),
-      email: normalizedEmail,
-      password: payload.password,
-      role: payload.role,
-      createdBy,
-    });
-
-    await user.save();
-    await auditService.logAction({
-      ...context.auditContext,
-      actorUserId: context.currentUser?.userId ?? null,
-      action: 'user.create',
-      entityType: 'user',
-      entityId: user.id,
-      metadata: {
-        email: user.email,
-        role: user.role,
-        bootstrapCreated: !context.currentUser,
-      },
-    });
+    const user = await createManagedUserAccount(payload, context);
 
     return {
       user: sanitizeUser(user),

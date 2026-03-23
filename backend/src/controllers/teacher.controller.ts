@@ -1,4 +1,5 @@
 import { HTTP_STATUS } from '../constants/http';
+import { buildAuditContext } from '../services/audit.service';
 import { teacherService } from '../services/teacher.service';
 import { ApiResponse } from '../utils/ApiResponse';
 import { asyncHandler } from '../utils/asyncHandler';
@@ -23,7 +24,11 @@ const getTeacherById = asyncHandler(async (req, res) => {
 });
 
 const createTeacher = asyncHandler(async (req, res) => {
-  const result = await teacherService.createTeacherProfile(req.body);
+  const result = await teacherService.createTeacherProfile(
+    req.body,
+    req.user!,
+    buildAuditContext(req),
+  );
 
   return ApiResponse.success(res, {
     statusCode: HTTP_STATUS.CREATED,
@@ -33,7 +38,11 @@ const createTeacher = asyncHandler(async (req, res) => {
 });
 
 const updateTeacher = asyncHandler(async (req, res) => {
-  const result = await teacherService.updateTeacherProfile(String(req.params.id), req.body);
+  const result = await teacherService.updateTeacherProfile(
+    String(req.params.id),
+    req.body,
+    buildAuditContext(req),
+  );
 
   return ApiResponse.success(res, {
     message: 'Teacher profile updated successfully.',
@@ -42,7 +51,10 @@ const updateTeacher = asyncHandler(async (req, res) => {
 });
 
 const deleteTeacher = asyncHandler(async (req, res) => {
-  const result = await teacherService.deleteTeacherProfile(String(req.params.id));
+  const result = await teacherService.deleteTeacherProfile(
+    String(req.params.id),
+    buildAuditContext(req),
+  );
 
   return ApiResponse.success(res, {
     message: 'Teacher profile deleted successfully.',

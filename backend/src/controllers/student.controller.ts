@@ -24,7 +24,11 @@ const getStudentById = asyncHandler(async (req, res) => {
 });
 
 const createStudent = asyncHandler(async (req, res) => {
-  const result = await studentService.createStudent(req.body, buildAuditContext(req));
+  const result = await studentService.createStudent(
+    req.body,
+    req.user!,
+    buildAuditContext(req),
+  );
 
   return ApiResponse.success(res, {
     statusCode: HTTP_STATUS.CREATED,
