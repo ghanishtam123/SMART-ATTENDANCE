@@ -13,6 +13,7 @@ export type SessionStatus = (typeof sessionStatusValues)[number]
 export interface Session {
   id: string
   title: string | null
+  timetableEntryId?: string | null
   classGroupId: string | null
   subjectId: string | null
   teacherId: string | null
@@ -57,3 +58,7 @@ export interface CreateSessionInput {
 }
 
 export type UpdateSessionInput = Partial<CreateSessionInput>
+
+export interface CreateSessionFromTimetableInput {
+  timetableEntryId: string
+}

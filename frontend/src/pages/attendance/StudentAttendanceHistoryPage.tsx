@@ -47,12 +47,12 @@ function StudentAttendanceHistoryPage() {
 
   const studentsQuery = useQuery({
     queryKey: ['students', 'attendance-history-options'],
-    queryFn: () => studentsApi.listStudents({ page: 1, limit: 200 }),
+    queryFn: () => studentsApi.listStudents({ page: 1, limit: 100 }),
   })
 
   const sessionsQuery = useQuery({
     queryKey: ['sessions', 'attendance-history-reference'],
-    queryFn: () => sessionsApi.listSessions({ page: 1, limit: 200 }),
+    queryFn: () => sessionsApi.listSessions({ page: 1, limit: 100 }),
   })
 
   const subjectsQuery = useQuery({
@@ -71,7 +71,7 @@ function StudentAttendanceHistoryPage() {
     queryFn: () =>
       attendanceApi.getStudentAttendanceHistory(studentId, {
         page: 1,
-        limit: 200,
+        limit: 100,
         status: statusFilter || undefined,
         from: fromDate || undefined,
         to: toDate || undefined,

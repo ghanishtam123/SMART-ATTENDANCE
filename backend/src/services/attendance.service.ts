@@ -415,6 +415,12 @@ const deriveAttendanceRecords = async (
 };
 
 export const attendanceService = {
+  recalculateCompletedSessionAttendanceForSystem: async (
+    sessionId: string,
+  ): Promise<AttendanceLifecycleSummary> => {
+    return deriveAttendanceRecords(sessionId, { finalize: false });
+  },
+
   recalculateSessionAttendance: async (
     sessionId: string,
     currentUser: AuthenticatedUser,

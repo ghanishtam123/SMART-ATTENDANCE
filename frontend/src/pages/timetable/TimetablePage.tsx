@@ -1,8 +1,9 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus } from 'lucide-react'
+import { Play, Plus } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useForm } from 'react-hook-form'
+import { useNavigate } from 'react-router-dom'
 import { z } from 'zod'
 
 import { classGroupsApi } from '../../api/classGroups.api'
@@ -11,6 +12,7 @@ import { subjectsApi } from '../../api/subjects.api'
 import { teachersApi } from '../../api/teachers.api'
 import { timetableApi } from '../../api/timetable.api'
 import { usersApi } from '../../api/users.api'
+import { sessionsApi } from '../../api/sessions.api'
 import ConfirmDialog from '../../components/common/ConfirmDialog'
 import ErrorMessage from '../../components/common/ErrorMessage'
 import Loader from '../../components/common/Loader'
@@ -224,6 +226,7 @@ function TimetableEntryForm({
 }
 
 function TimetablePage() {
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [dayFilter, setDayFilter] = useState<TimetableDayOfWeek | ''>('')
   const [classGroupFilter, setClassGroupFilter] = useState('')
@@ -231,6 +234,8 @@ function TimetablePage() {
   const [sheetOpen, setSheetOpen] = useState(false)
   const [editingEntry, setEditingEntry] = useState<TimetableEntry | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [startingEntryId, setStartingEntryId] = useState<string | null>(null)
   const [statusTarget, setStatusTarget] = useState<{
     entry: TimetableEntry
     nextActive: boolean
@@ -448,6 +453,26 @@ function TimetablePage() {
     },
   })
 
+  const startSessionMutation = useMutation({
+    mutationFn: async (timetableEntryId: string) => {
+      setActionError(null)
+      setStartingEntryId(timetableEntryId)
+      return sessionsApi.createSessionFromTimetable({ timetableEntryId })
+    },
+    onSuccess: async (session) => {
+      await queryClient.invalidateQueries({ queryKey: ['sessions'] })
+      navigate(routes.sessionDetails.replace(':sessionId', session.id))
+    },
+    onError: (error) => {
+      setActionError(
+        getErrorMessage(error, 'Unable to start a session from this timetable entry.'),
+      )
+    },
+    onSettled: () => {
+      setStartingEntryId(null)
+    },
+  })
+
   const totalEntries =
     timetableQuery.data?.meta.totalItems ?? timetableQuery.data?.items.length ?? 0
 
@@ -513,10 +538,27 @@ function TimetablePage() {
       {
         key: 'actions',
         header: 'Actions',
-        className: 'w-44',
+        className: 'w-64',
         headerClassName: 'text-right',
         render: (entry) => (
           <div className="flex items-center justify-end gap-2">
+            {entry.isActive ? (
+              <button
+                type="button"
+                onClick={() => {
+                  void startSessionMutation.mutateAsync(entry.id)
+                }}
+                disabled={startSessionMutation.isPending && startingEntryId === entry.id}
+                className="inline-flex h-9 items-center gap-2 rounded-xl border border-brand-200 bg-brand-50 px-3 text-xs font-semibold uppercase tracking-[0.16em] text-brand-700 transition hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Play className="h-3.5 w-3.5" />
+                <span>
+                  {startSessionMutation.isPending && startingEntryId === entry.id
+                    ? 'Starting'
+                    : 'Start'}
+                </span>
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() =>
@@ -540,7 +582,14 @@ function TimetablePage() {
         ),
       },
     ],
-    [classGroupLabelMap, classroomLabelMap, subjectLabelMap, teacherLabelMap],
+    [
+      classGroupLabelMap,
+      classroomLabelMap,
+      startSessionMutation,
+      startingEntryId,
+      subjectLabelMap,
+      teacherLabelMap,
+    ],
   )
 
   return (
@@ -553,45 +602,76 @@ function TimetablePage() {
         eyebrow="Scheduling"
         title="Timetable"
         description="Manage reusable weekly schedule entries that can later drive session creation."
-        actions={
-          <button
-            type="button"
-            onClick={() => {
-              setEditingEntry(null)
-              setFormError(null)
-              setSheetOpen(true)
-            }}
-            className="inline-flex items-center gap-2 rounded-2xl bg-ink-950 px-4 py-3 text-sm font-medium text-white transition hover:bg-ink-800"
-          >
-            <Plus className="h-4 w-4" />
-            Add entry
-          </button>
-        }
       />
 
       {referenceError ? <ErrorMessage message={referenceError} /> : null}
+      {actionError ? <ErrorMessage message={actionError} /> : null}
 
-      <div className="grid gap-4 lg:grid-cols-[220px_280px_200px]">
-        <SelectField
-          label="Day"
-          value={dayFilter}
-          options={[{ value: '', label: 'All days' }, ...dayOptions]}
-          onChange={(event) => setDayFilter(event.target.value as TimetableDayOfWeek | '')}
-        />
-        <SelectField
-          label="Class group"
-          value={classGroupFilter}
-          options={[{ value: '', label: 'All class groups' }, ...classGroupOptions]}
-          onChange={(event) => setClassGroupFilter(event.target.value)}
-        />
-        <SelectField
-          label="Status"
-          value={statusFilter}
-          options={statusOptions}
-          onChange={(event) =>
-            setStatusFilter(event.target.value as 'active' | 'inactive' | '')
-          }
-        />
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row xl:items-center">
+          <label className="flex h-12 min-w-[170px] items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 shadow-sm transition focus-within:border-brand-200 focus-within:ring-4 focus-within:ring-brand-100/70">
+            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-ink-400">
+              Day
+            </span>
+            <select
+              value={dayFilter}
+              onChange={(event) => setDayFilter(event.target.value as TimetableDayOfWeek | '')}
+              className="w-full bg-transparent text-sm text-ink-950 outline-none"
+            >
+              {[{ value: '', label: 'All days' }, ...dayOptions].map((option) => (
+                <option key={option.value || 'all'} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex h-12 min-w-[220px] items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 shadow-sm transition focus-within:border-brand-200 focus-within:ring-4 focus-within:ring-brand-100/70">
+            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-ink-400">
+              Group
+            </span>
+            <select
+              value={classGroupFilter}
+              onChange={(event) => setClassGroupFilter(event.target.value)}
+              className="w-full bg-transparent text-sm text-ink-950 outline-none"
+            >
+              {[{ value: '', label: 'All class groups' }, ...classGroupOptions].map((option) => (
+                <option key={option.value || 'all'} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex h-12 min-w-[170px] items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 shadow-sm transition focus-within:border-brand-200 focus-within:ring-4 focus-within:ring-brand-100/70">
+            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-ink-400">
+              Status
+            </span>
+            <select
+              value={statusFilter}
+              onChange={(event) =>
+                setStatusFilter(event.target.value as 'active' | 'inactive' | '')
+              }
+              className="w-full bg-transparent text-sm text-ink-950 outline-none"
+            >
+              {statusOptions.map((option) => (
+                <option key={option.value || 'all'} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            setEditingEntry(null)
+            setFormError(null)
+            setSheetOpen(true)
+          }}
+          className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-ink-950 px-4 text-sm font-medium whitespace-nowrap text-white transition hover:bg-ink-800"
+        >
+          <Plus className="h-4 w-4" />
+          Add entry
+        </button>
       </div>
 
       {timetableQuery.isError ? (

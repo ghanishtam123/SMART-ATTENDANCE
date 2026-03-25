@@ -15,6 +15,7 @@ import { useAuth } from '../hooks/useAuth'
 import AuthLayout from '../layouts/AuthLayout'
 import DashboardLayout from '../layouts/DashboardLayout'
 import LoginPage from '../pages/auth/LoginPage'
+import AdminsPage from '../pages/admins/AdminsPage'
 import AlertsPage from '../pages/alerts/AlertsPage'
 import AnalyticsPage from '../pages/analytics/AnalyticsPage'
 import AttendanceRecordsPage from '../pages/attendance/AttendanceRecordsPage'
@@ -36,10 +37,10 @@ import MySubjectsPage from '../pages/student-portal/MySubjectsPage'
 import StudentsPage from '../pages/students/StudentsPage'
 import SubjectsPage from '../pages/subjects/SubjectsPage'
 import TeachersPage from '../pages/teachers/TeachersPage'
+import TeacherMyProfilePage from '../pages/teacher-portal/MyProfilePage'
 import SessionDetailsPage from '../pages/sessions/SessionDetailsPage'
 import SessionsPage from '../pages/sessions/SessionsPage'
 import TimetablePage from '../pages/timetable/TimetablePage'
-import UsersPage from '../pages/users/UsersPage'
 import type { UserRole } from '../types/user'
 import { getDashboardRouteForRole, hasAnyRole } from '../utils/role'
 
@@ -137,9 +138,12 @@ export function AppRouter() {
           <Route element={<DashboardLayout />}>
             <Route path={routes.dashboard} element={<DashboardRedirect />} />
 
+            <Route element={<RequireRole allowedRoles={['super_admin']} />}>
+              <Route path={routes.admins} element={<AdminsPage />} />
+            </Route>
+
             <Route element={<RequireRole allowedRoles={adminRoles} />}>
               <Route path={routes.adminDashboard} element={<AdminDashboardPage />} />
-              <Route path={routes.users} element={<UsersPage />} />
               <Route path={routes.students} element={<StudentsPage />} />
               <Route path={routes.teachers} element={<TeachersPage />} />
               <Route path={routes.classGroups} element={<ClassGroupsPage />} />
@@ -164,6 +168,7 @@ export function AppRouter() {
 
             <Route element={<RequireRole allowedRoles={['teacher']} />}>
               <Route path={routes.teacherDashboard} element={<TeacherDashboardPage />} />
+              <Route path={routes.teacherMyProfile} element={<TeacherMyProfilePage />} />
             </Route>
 
             <Route element={<RequireRole allowedRoles={studentRoles} />}>

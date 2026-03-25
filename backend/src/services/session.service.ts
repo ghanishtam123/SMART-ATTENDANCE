@@ -1,5 +1,6 @@
 import { FilterQuery } from 'mongoose';
 
+import logger from '../config/logger';
 import { HTTP_STATUS } from '../constants/http';
 import {
   ACTIVE_SESSION_STATUSES,
@@ -11,6 +12,7 @@ import ClassroomModel from '../models/Classroom.model';
 import SessionModel, { Session } from '../models/Session.model';
 import SubjectModel from '../models/Subject.model';
 import TeacherProfileModel from '../models/TeacherProfile.model';
+import TimetableEntryModel from '../models/TimetableEntry.model';
 import { AuthenticatedUser } from '../types/auth.types';
 import { PaginatedResult, RequestAuditContext } from '../types/common.types';
 import { AppError } from '../utils/AppError';
@@ -18,6 +20,7 @@ import {
   buildPaginationMeta,
   getPaginationOptions,
 } from '../utils/pagination';
+import { attendanceService } from './attendance.service';
 import { auditService } from './audit.service';
 
 interface SessionListQuery {
@@ -46,6 +49,24 @@ interface SessionPayload {
   minimumPresencePercentage?: number;
   notes?: string | null;
 }
+
+interface AutoCompleteOverdueSessionsOptions {
+  sessionId?: string;
+  trigger: 'scheduler' | 'session_read' | 'live_read' | 'ingestion';
+  auditContext?: RequestAuditContext;
+}
+
+interface AutoCompleteOverdueSessionsSummary {
+  checkedCount: number;
+  completedCount: number;
+  completedSessionIds: string[];
+}
+
+const DEFAULT_TIMETABLE_SESSION_THRESHOLDS = {
+  graceMinutesForLate: 5,
+  minimumPresenceMinutes: 15,
+  minimumPresencePercentage: 50,
+} as const;
 
 interface SessionReferenceBundle {
   classGroup: {
@@ -109,6 +130,27 @@ const getScheduledDateTime = (scheduledDate: Date, timeValue: string): Date => {
   return new Date(`${getDatePortion(scheduledDate)}T${timeValue}:00.000Z`);
 };
 
+const getScheduledEndDateTime = (session: {
+  scheduledDate: Date;
+  scheduledEndTime: string;
+}): Date => {
+  return getScheduledDateTime(session.scheduledDate, session.scheduledEndTime);
+};
+
+const hasSessionReachedEndTime = (
+  session: {
+    scheduledDate: Date;
+    scheduledEndTime: string;
+    actualEndTime: Date | null;
+  },
+  now: Date,
+): boolean => {
+  const completionDeadline =
+    session.actualEndTime ?? getScheduledEndDateTime(session);
+
+  return completionDeadline <= now;
+};
+
 const ensureValidScheduleWindow = (
   scheduledStartTime: string,
   scheduledEndTime: string,
@@ -155,6 +197,18 @@ const getSessionOrThrow = async (id: string) => {
   }
 
   return session;
+};
+
+const getTeacherProfileIdForUser = async (
+  userId: string,
+): Promise<string | null> => {
+  const teacherProfile = (await TeacherProfileModel.findOne({
+    userId,
+  })
+    .select('_id')
+    .lean()) as { _id: unknown } | null;
+
+  return teacherProfile ? String(teacherProfile._id) : null;
 };
 
 const getReferenceBundle = async (payload: {
@@ -286,13 +340,9 @@ const assertTeacherCanManageSession = async (
     return;
   }
 
-  const teacherProfile = await TeacherProfileModel.findOne({
-    userId: currentUser.userId,
-  })
-    .select('_id')
-    .lean() as { _id: unknown } | null;
+  const teacherProfileId = await getTeacherProfileIdForUser(currentUser.userId);
 
-  if (!teacherProfile || String(teacherProfile._id) !== String(sessionTeacherId)) {
+  if (!teacherProfileId || teacherProfileId !== String(sessionTeacherId)) {
     throw new AppError(
       'You can only manage lifecycle actions for your own sessions.',
       HTTP_STATUS.FORBIDDEN,
@@ -318,10 +368,105 @@ const assertSessionCanBeDeleted = (status: SessionStatus): void => {
   }
 };
 
+const autoCompleteSession = async (
+  session: Awaited<ReturnType<typeof getSessionOrThrow>>,
+  options: AutoCompleteOverdueSessionsOptions,
+): Promise<boolean> => {
+  const now = new Date();
+
+  if (
+    !ACTIVE_SESSION_STATUSES.includes(session.status) ||
+    !hasSessionReachedEndTime(session, now)
+  ) {
+    return false;
+  }
+
+  if (!session.actualStartTime) {
+    session.actualStartTime = getScheduledDateTime(
+      session.scheduledDate,
+      session.scheduledStartTime,
+    );
+  }
+
+  session.actualEndTime = session.actualEndTime ?? now;
+  session.status = SessionStatus.COMPLETED;
+
+  await session.save();
+
+  try {
+    await attendanceService.recalculateCompletedSessionAttendanceForSystem(
+      session.id,
+    );
+  } catch (error) {
+    logger.error(
+      {
+        err: error,
+        sessionId: session.id,
+        trigger: options.trigger,
+      },
+      'Failed to recalculate attendance after automatic session completion.',
+    );
+  }
+
+  await auditService.logAction({
+    ...options.auditContext,
+    action: 'session.auto_complete',
+    entityType: 'session',
+    entityId: session.id,
+    metadata: {
+      trigger: options.trigger,
+      status: session.status,
+      actualEndTime: session.actualEndTime?.toISOString() ?? null,
+    },
+  });
+
+  return true;
+};
+
 export const sessionService = {
+  autoCompleteOverdueSessions: async (
+    options: AutoCompleteOverdueSessionsOptions,
+  ): Promise<AutoCompleteOverdueSessionsSummary> => {
+    const candidates = await SessionModel.find({
+      status: { $in: ACTIVE_SESSION_STATUSES },
+      ...(options.sessionId ? { _id: options.sessionId } : {}),
+    }).sort({ scheduledDate: 1, scheduledEndTime: 1, createdAt: 1 });
+
+    const completedSessionIds: string[] = [];
+
+    for (const session of candidates) {
+      try {
+        const completed = await autoCompleteSession(session, options);
+
+        if (completed) {
+          completedSessionIds.push(session.id);
+        }
+      } catch (error) {
+        logger.error(
+          {
+            err: error,
+            sessionId: session.id,
+            trigger: options.trigger,
+          },
+          'Failed to automatically complete overdue session.',
+        );
+      }
+    }
+
+    return {
+      checkedCount: candidates.length,
+      completedCount: completedSessionIds.length,
+      completedSessionIds,
+    };
+  },
+
   listSessions: async (
     query: SessionListQuery,
   ): Promise<PaginatedResult<unknown>> => {
+    await sessionService.autoCompleteOverdueSessions({
+      trigger: 'session_read',
+    });
+
     const { page, limit, skip } = getPaginationOptions(query.page, query.limit);
     const filter: FilterQuery<Session> = {};
 
@@ -373,7 +518,130 @@ export const sessionService = {
   },
 
   getSessionById: async (id: string): Promise<unknown> => {
+    await sessionService.autoCompleteOverdueSessions({
+      sessionId: id,
+      trigger: 'session_read',
+    });
+
     const session = await getSessionOrThrow(id);
+    return session.toJSON();
+  },
+
+  createStartedSessionFromTimetable: async (
+    timetableEntryId: string,
+    currentUser: AuthenticatedUser,
+    auditContext?: RequestAuditContext,
+  ): Promise<unknown> => {
+    const timetableEntry = await TimetableEntryModel.findById(timetableEntryId).lean() as {
+      _id: unknown;
+      classGroupId: unknown;
+      subjectId: unknown;
+      teacherId: unknown;
+      classroomId: unknown;
+      cameraIds: string[];
+      startTime: string;
+      endTime: string;
+      notes?: string | null;
+      isActive: boolean;
+    } | null;
+
+    if (!timetableEntry) {
+      throw new AppError('Timetable entry not found.', HTTP_STATUS.NOT_FOUND);
+    }
+
+    if (!timetableEntry.isActive) {
+      throw new AppError(
+        'Only active timetable entries can start sessions.',
+        HTTP_STATUS.BAD_REQUEST,
+      );
+    }
+
+    if (currentUser.role === UserRole.TEACHER) {
+      const teacherProfileId = await getTeacherProfileIdForUser(currentUser.userId);
+
+      if (!teacherProfileId || teacherProfileId !== String(timetableEntry.teacherId)) {
+        throw new AppError(
+          'You can only start sessions from your own timetable entries.',
+          HTTP_STATUS.FORBIDDEN,
+        );
+      }
+    }
+
+    const today = getDatePortion(new Date());
+    const scheduledDate = getDateOnly(today);
+    const existingSession = await SessionModel.findOne({
+      timetableEntryId,
+      scheduledDate: {
+        $gte: scheduledDate,
+        $lt: getNextDateOnly(today),
+      },
+    });
+
+    if (existingSession) {
+      if (existingSession.status === SessionStatus.CREATED) {
+        if (!existingSession.actualStartTime) {
+          existingSession.actualStartTime = new Date();
+        }
+
+        existingSession.status = SessionStatus.STARTED;
+        await existingSession.save();
+      }
+
+      return existingSession.toJSON();
+    }
+
+    ensureValidScheduleWindow(timetableEntry.startTime, timetableEntry.endTime);
+
+    const references = await getReferenceBundle({
+      classGroupId: String(timetableEntry.classGroupId),
+      subjectId: String(timetableEntry.subjectId),
+      teacherId: String(timetableEntry.teacherId),
+      classroomId: String(timetableEntry.classroomId),
+    });
+
+    const resolvedCameraIds = resolveSessionCameraIds(
+      timetableEntry.cameraIds,
+      references.classroom.cameraIds,
+    );
+
+    await assertNoConcurrentActiveSession({
+      classroomId: references.classroom._id,
+      cameraIds: resolvedCameraIds,
+    });
+
+    const session = await SessionModel.create({
+      title: resolveSessionTitle(undefined, references),
+      timetableEntryId: timetableEntry._id,
+      classGroupId: references.classGroup._id,
+      subjectId: references.subject._id,
+      teacherId: references.teacherProfile._id,
+      classroomId: references.classroom._id,
+      cameraIds: resolvedCameraIds,
+      scheduledDate,
+      scheduledStartTime: timetableEntry.startTime,
+      scheduledEndTime: timetableEntry.endTime,
+      actualStartTime: new Date(),
+      graceMinutesForLate: DEFAULT_TIMETABLE_SESSION_THRESHOLDS.graceMinutesForLate,
+      minimumPresenceMinutes:
+        DEFAULT_TIMETABLE_SESSION_THRESHOLDS.minimumPresenceMinutes,
+      minimumPresencePercentage:
+        DEFAULT_TIMETABLE_SESSION_THRESHOLDS.minimumPresencePercentage,
+      notes: timetableEntry.notes ?? null,
+      status: SessionStatus.STARTED,
+    });
+
+    await auditService.logAction({
+      ...auditContext,
+      actorUserId: currentUser.userId,
+      action: 'session.start_from_timetable',
+      entityType: 'session',
+      entityId: session.id,
+      metadata: {
+        timetableEntryId,
+        status: session.status,
+      },
+    });
+
     return session.toJSON();
   },
 

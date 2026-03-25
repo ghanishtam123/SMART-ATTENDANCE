@@ -7,6 +7,7 @@ import { authorize } from '../middleware/role.middleware';
 import { validateRequest } from '../middleware/validate.middleware';
 import {
   createSessionSchema,
+  createSessionFromTimetableSchema,
   sessionIdParamSchema,
   sessionListQuerySchema,
   updateSessionSchema,
@@ -33,6 +34,12 @@ router.post(
   authorize(UserRole.SUPER_ADMIN, UserRole.ADMIN),
   validateRequest({ body: createSessionSchema }),
   sessionController.createSession,
+);
+router.post(
+  '/from-timetable',
+  authorize(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.TEACHER),
+  validateRequest({ body: createSessionFromTimetableSchema }),
+  sessionController.createSessionFromTimetable,
 );
 router.patch(
   '/:id',

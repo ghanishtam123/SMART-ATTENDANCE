@@ -2,7 +2,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
-import { useForm, useWatch } from 'react-hook-form'
+import { Controller, useForm } from 'react-hook-form'
 import { z } from 'zod'
 
 import { classGroupsApi } from '../../api/classGroups.api'
@@ -18,7 +18,7 @@ import SidePanel from '../../components/common/SidePanel'
 import StatusBadge from '../../components/common/StatusBadge'
 import FormActions from '../../components/forms/FormActions'
 import InputField from '../../components/forms/InputField'
-import SelectField from '../../components/forms/SelectField'
+import MultiOptionField from '../../components/forms/MultiOptionField'
 import DataTable, { type DataTableColumn } from '../../components/tables/DataTable'
 import TableActions from '../../components/tables/TableActions'
 import { routes } from '../../constants/routes'
@@ -37,18 +37,12 @@ interface TeacherFormValues {
   designation: string
   subjectsTaught: string[]
   assignedClassGroups: string[]
-  createLoginAccount: boolean
-  userId: string
   login: {
     fullName: string
     email: string
     password: string
-    isActive: boolean
   }
 }
-
-const isValidOptionalEmail = (value: string) =>
-  !value || z.string().email().safeParse(value).success
 
 const teacherFormSchemaBase = z.object({
   employeeId: z.string().trim().min(1, 'Employee ID is required.'),
@@ -56,18 +50,10 @@ const teacherFormSchemaBase = z.object({
   designation: z.string().trim().min(2, 'Designation is required.'),
   subjectsTaught: z.array(z.string()),
   assignedClassGroups: z.array(z.string()),
-  createLoginAccount: z.boolean(),
-  userId: z.string(),
   login: z.object({
-    fullName: z.string(),
-    email: z
-      .string()
-      .trim()
-      .refine(isValidOptionalEmail, {
-        message: 'Enter a valid login email address.',
-      }),
-    password: z.string(),
-    isActive: z.boolean(),
+    fullName: z.string().trim(),
+    email: z.string().trim().email('Enter a valid login email address.'),
+    password: z.string().trim(),
   }),
 })
 
@@ -77,39 +63,19 @@ const buildTeacherFormSchema = (isEditMode: boolean) =>
       return
     }
 
-    if (value.createLoginAccount) {
-      if (value.login.fullName.trim().length < 2) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['login', 'fullName'],
-          message: 'Teacher full name is required.',
-        })
-      }
-
-      if (!value.login.email.trim()) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['login', 'email'],
-          message: 'Login email is required when login creation is enabled.',
-        })
-      }
-
-      if (value.login.password.trim().length < 8) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['login', 'password'],
-          message: 'Password must be at least 8 characters.',
-        })
-      }
-
-      return
-    }
-
-    if (!value.userId.trim()) {
+    if (value.login.fullName.trim().length < 2) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ['userId'],
-        message: 'Select an existing teacher login account or enable login creation.',
+        path: ['login', 'fullName'],
+        message: 'Teacher full name is required.',
+      })
+    }
+
+    if (value.login.password.trim().length < 8) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['login', 'password'],
+        message: 'Password must be at least 8 characters.',
       })
     }
   })
@@ -123,20 +89,16 @@ const getDefaultValues = (
   designation: teacher?.designation ?? '',
   subjectsTaught: teacher?.subjectsTaught ?? [],
   assignedClassGroups: teacher?.assignedClassGroups ?? [],
-  createLoginAccount: !teacher,
-  userId: teacher?.userId ?? '',
   login: {
     fullName: linkedUser?.fullName ?? '',
     email: linkedUser?.email ?? '',
     password: '',
-    isActive: linkedUser?.isActive ?? true,
   },
 })
 
 interface TeacherFormProps {
   teacher?: TeacherProfile | null
   linkedUser?: User | null
-  userOptions: Array<{ label: string; value: string }>
   subjectOptions: Array<{ label: string; value: string }>
   classGroupOptions: Array<{ label: string; value: string }>
   submitError: string | null
@@ -149,7 +111,6 @@ interface TeacherFormProps {
 function TeacherForm({
   teacher,
   linkedUser,
-  userOptions,
   subjectOptions,
   classGroupOptions,
   submitError,
@@ -170,11 +131,6 @@ function TeacherForm({
     defaultValues: getDefaultValues(teacher, linkedUser),
   })
 
-  const createLoginAccount = useWatch({
-    control,
-    name: 'createLoginAccount',
-  })
-
   useEffect(() => {
     reset(getDefaultValues(teacher, linkedUser))
   }, [linkedUser, reset, teacher])
@@ -186,9 +142,7 @@ function TeacherForm({
           <h3 className="text-base font-semibold text-ink-950">
             Professional Details
           </h3>
-          <p className="text-sm text-ink-500">
-            Core profile details for the teacher record.
-          </p>
+          <p className="text-sm text-ink-500">Core profile details.</p>
         </div>
 
         <div className="space-y-5">
@@ -227,22 +181,36 @@ function TeacherForm({
         </div>
 
         <div className="space-y-5">
-          <SelectField
-            label="Subjects taught"
-            multiple
-            options={subjectOptions}
-            hint="Hold Ctrl/Cmd to select multiple subjects."
-            error={errors.subjectsTaught?.message}
-            {...register('subjectsTaught')}
+          <Controller
+            control={control}
+            name="subjectsTaught"
+            render={({ field }) => (
+              <MultiOptionField
+                label="Subjects taught"
+                options={subjectOptions}
+                value={field.value}
+                onChange={field.onChange}
+                hint="Choose one or more subjects linked to this teacher."
+                error={errors.subjectsTaught?.message}
+                emptyMessage="No subjects available yet."
+              />
+            )}
           />
 
-          <SelectField
-            label="Assigned class groups"
-            multiple
-            options={classGroupOptions}
-            hint="Link the teacher profile to one or more academic groups."
-            error={errors.assignedClassGroups?.message}
-            {...register('assignedClassGroups')}
+          <Controller
+            control={control}
+            name="assignedClassGroups"
+            render={({ field }) => (
+              <MultiOptionField
+                label="Assigned class groups"
+                options={classGroupOptions}
+                value={field.value}
+                onChange={field.onChange}
+                hint="Choose the academic groups this teacher will be responsible for."
+                error={errors.assignedClassGroups?.message}
+                emptyMessage="No class groups available yet."
+              />
+            )}
           />
         </div>
       </div>
@@ -250,10 +218,10 @@ function TeacherForm({
       <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm">
         <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
           <div className="space-y-1">
-            <h3 className="text-base font-semibold text-ink-950">Login Account Setup</h3>
-            <p className="text-sm text-ink-500">
-              Teacher login is usually created here so the profile is ready in one step.
-            </p>
+            <h3 className="text-base font-semibold text-ink-950">
+              Teacher Login Account (Required)
+            </h3>
+            <p className="text-sm text-ink-500">Login is created automatically.</p>
           </div>
           {isEditMode ? (
             <StatusBadge
@@ -277,92 +245,37 @@ function TeacherForm({
               <div className="space-y-1">
                 <p className="font-medium text-ink-900">{linkedUser.fullName}</p>
                 <p>{linkedUser.email}</p>
-                <p className="text-xs text-ink-500">
-                  Manage password and active status from the Users module.
-                </p>
+                <p className="text-xs text-ink-500">Password is managed separately.</p>
               </div>
             ) : (
-              <p>No linked login account is attached to this teacher profile yet.</p>
+              <p>No linked login account.</p>
             )}
           </div>
         ) : (
-          <div className="space-y-4">
-            <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-ink-700">
-              <input
-                type="checkbox"
-                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200"
-                {...register('createLoginAccount')}
+          <div className="rounded-2xl border border-brand-100 bg-brand-50/40 p-4">
+            <div className="grid gap-5 md:grid-cols-2">
+              <InputField
+                label="Full name"
+                placeholder="Teacher One"
+                error={errors.login?.fullName?.message}
+                {...register('login.fullName')}
               />
-              <span className="space-y-1">
-                <span className="block font-medium text-ink-950">
-                  Create linked teacher login account
-                </span>
-                <span className="block text-ink-500">
-                  Enabled by default so the teacher profile and login are provisioned
-                  together.
-                </span>
-              </span>
-            </label>
-
-            {createLoginAccount ? (
-              <div className="rounded-2xl border border-brand-100 bg-brand-50/40 p-4">
-                <div className="mb-4 space-y-1">
-                  <p className="text-sm font-semibold text-ink-950">Login Account Setup</p>
-                  <p className="text-sm text-ink-500">
-                    These credentials will create the linked teacher user account.
-                  </p>
-                </div>
-
-                <div className="grid gap-5 md:grid-cols-2">
-                  <InputField
-                    label="Full name"
-                    placeholder="Teacher One"
-                    error={errors.login?.fullName?.message}
-                    {...register('login.fullName')}
-                  />
-                  <InputField
-                    label="Login email"
-                    type="email"
-                    placeholder="teacher1@example.com"
-                    error={errors.login?.email?.message}
-                    {...register('login.email')}
-                  />
-                </div>
-
-                <InputField
-                  label="Temporary password"
-                  type="password"
-                  placeholder="Teacher@123"
-                  error={errors.login?.password?.message}
-                  {...register('login.password')}
-                />
-
-                <label className="mt-4 flex items-start gap-3 rounded-2xl border border-white/70 bg-white/80 px-4 py-4 text-sm text-ink-700">
-                  <input
-                    type="checkbox"
-                    className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200"
-                    {...register('login.isActive')}
-                  />
-                  <span className="space-y-1">
-                    <span className="block font-medium text-ink-950">
-                      Keep login account active
-                    </span>
-                    <span className="block text-ink-500">
-                      Disable this if the teacher login should be provisioned but not
-                      used yet.
-                    </span>
-                  </span>
-                </label>
-              </div>
-            ) : (
-              <SelectField
-                label="Link existing teacher login"
-                options={userOptions}
-                placeholder="Select existing teacher user"
-                error={errors.userId?.message}
-                {...register('userId')}
+              <InputField
+                label="Login email"
+                type="email"
+                placeholder="teacher1@example.com"
+                error={errors.login?.email?.message}
+                {...register('login.email')}
               />
-            )}
+            </div>
+
+            <InputField
+              label="Temporary Password"
+              type="password"
+              placeholder="Teacher@123"
+              error={errors.login?.password?.message}
+              {...register('login.password')}
+            />
           </div>
         )}
       </div>
@@ -387,6 +300,11 @@ function TeachersPage() {
   const [sheetOpen, setSheetOpen] = useState(false)
   const [editingTeacher, setEditingTeacher] = useState<TeacherProfile | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<TeacherProfile | null>(null)
+  const [statusTarget, setStatusTarget] = useState<{
+    teacher: TeacherProfile
+    linkedUser: User
+    nextActive: boolean
+  } | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const debouncedSearch = useDebounce(search)
@@ -428,15 +346,6 @@ function TeachersPage() {
       new Map(
         (teacherUsersQuery.data?.items ?? []).map((user) => [user.id, user] as const),
       ),
-    [teacherUsersQuery.data?.items],
-  )
-
-  const userOptions = useMemo(
-    () =>
-      (teacherUsersQuery.data?.items ?? []).map((user) => ({
-        value: user.id,
-        label: `${user.fullName} • ${user.email}`,
-      })),
     [teacherUsersQuery.data?.items],
   )
 
@@ -500,18 +409,13 @@ function TeachersPage() {
 
       const payload: CreateTeacherPayload = {
         ...basePayload,
-        createLoginAccount: values.createLoginAccount,
-      }
-
-      if (values.createLoginAccount) {
-        payload.login = {
+        createLoginAccount: true,
+        login: {
           fullName: values.login.fullName.trim(),
-          email: values.login.email.trim(),
+          email: values.login.email.trim().toLowerCase(),
           password: values.login.password,
-          isActive: values.login.isActive,
-        }
-      } else if (values.userId.trim()) {
-        payload.userId = values.userId.trim()
+          isActive: true,
+        },
       }
 
       return teachersApi.createTeacher(payload)
@@ -541,6 +445,25 @@ function TeachersPage() {
       await queryClient.invalidateQueries({ queryKey: ['teachers'] })
       setSuccessMessage('Teacher profile deleted successfully.')
       setDeleteTarget(null)
+    },
+  })
+
+  const statusMutation = useMutation({
+    mutationFn: async (target: {
+      teacher: TeacherProfile
+      linkedUser: User
+      nextActive: boolean
+    }) =>
+      usersApi.updateUserStatus(target.linkedUser.id, {
+        isActive: target.nextActive,
+      }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['teachers'] }),
+        queryClient.invalidateQueries({ queryKey: ['users'] }),
+      ])
+      setSuccessMessage('Teacher login status updated successfully.')
+      setStatusTarget(null)
     },
   })
 
@@ -613,19 +536,40 @@ function TeachersPage() {
       {
         key: 'actions',
         header: 'Actions',
-        className: 'w-28',
+        className: 'w-44',
         headerClassName: 'text-right',
-        render: (teacher) => (
-          <TableActions
-            onEdit={() => {
-              setEditingTeacher(teacher)
-              setFormError(null)
-              setSuccessMessage(null)
-              setSheetOpen(true)
-            }}
-            onDelete={() => setDeleteTarget(teacher)}
-          />
-        ),
+        render: (teacher) => {
+          const linkedUser = userMap.get(teacher.userId ?? '')
+
+          return (
+            <div className="flex items-center justify-end gap-2">
+              {linkedUser ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setStatusTarget({
+                      teacher,
+                      linkedUser,
+                      nextActive: !linkedUser.isActive,
+                    })
+                  }
+                  className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-ink-600 transition hover:border-brand-200 hover:bg-brand-50 hover:text-brand-700"
+                >
+                  {linkedUser.isActive ? 'Disable' : 'Enable'}
+                </button>
+              ) : null}
+              <TableActions
+                onEdit={() => {
+                  setEditingTeacher(teacher)
+                  setFormError(null)
+                  setSuccessMessage(null)
+                  setSheetOpen(true)
+                }}
+                onDelete={() => setDeleteTarget(teacher)}
+              />
+            </div>
+          )
+        },
       },
     ],
     [userMap],
@@ -644,22 +588,7 @@ function TeachersPage() {
         ]}
         eyebrow="Academics"
         title="Teachers"
-        description="Create teacher profiles and linked teacher login accounts together from one admin form."
-        actions={
-          <button
-            type="button"
-            onClick={() => {
-              setEditingTeacher(null)
-              setFormError(null)
-              setSuccessMessage(null)
-              setSheetOpen(true)
-            }}
-            className="inline-flex items-center gap-2 rounded-2xl bg-ink-950 px-4 py-3 text-sm font-medium text-white transition hover:bg-ink-800"
-          >
-            <Plus className="h-4 w-4" />
-            Add teacher
-          </button>
-        }
+        description="Create teacher profiles and required linked teacher login accounts together from one admin form."
       />
 
       {successMessage ? (
@@ -668,19 +597,40 @@ function TeachersPage() {
         </div>
       ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_240px]">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
         <SearchInput
+          wrapperClassName="xl:flex-1"
           value={search}
           onChange={(event) => setSearch(event.target.value)}
           onClear={() => setSearch('')}
           placeholder="Search by employee ID, designation, or department"
         />
-        <InputField
-          label="Department filter"
-          value={departmentFilter}
-          onChange={(event) => setDepartmentFilter(event.target.value)}
-          placeholder="Filter by department"
-        />
+        <div className="flex flex-col gap-3 sm:flex-row xl:items-center">
+          <label className="flex h-12 min-w-[220px] items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 shadow-sm transition focus-within:border-brand-200 focus-within:ring-4 focus-within:ring-brand-100/70">
+            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-ink-400">
+              Dept
+            </span>
+            <input
+              value={departmentFilter}
+              onChange={(event) => setDepartmentFilter(event.target.value)}
+              placeholder="Filter by department"
+              className="w-full bg-transparent text-sm text-ink-950 placeholder:text-ink-400 outline-none"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => {
+              setEditingTeacher(null)
+              setFormError(null)
+              setSuccessMessage(null)
+              setSheetOpen(true)
+            }}
+            className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-ink-950 px-4 text-sm font-medium whitespace-nowrap text-white transition hover:bg-ink-800"
+          >
+            <Plus className="h-4 w-4" />
+            Add teacher
+          </button>
+        </div>
       </div>
 
       {teachersQuery.isError ? (
@@ -697,14 +647,14 @@ function TeachersPage() {
           columns={columns}
           getRowKey={(teacher) => teacher.id}
           emptyTitle="No teacher profiles found."
-          emptyDescription="Create a teacher profile and optionally provision the login in the same flow."
+          emptyDescription="Create a teacher profile and linked login account in the same flow."
         />
       )}
 
       <SidePanel
         open={sheetOpen}
         title={editingTeacher ? 'Edit teacher profile' : 'Create teacher profile'}
-        description="Teacher profiles connect professional data, teaching assignments, and linked login access."
+        description="Create a teacher profile and login."
         onClose={() => {
           setSheetOpen(false)
           setEditingTeacher(null)
@@ -717,7 +667,6 @@ function TeachersPage() {
           <TeacherForm
             teacher={editingTeacher}
             linkedUser={activeLinkedUser}
-            userOptions={userOptions}
             subjectOptions={subjectOptions}
             classGroupOptions={classGroupOptions}
             submitError={formError}
@@ -750,6 +699,29 @@ function TeachersPage() {
         onConfirm={() => {
           if (deleteTarget) {
             deleteMutation.mutate(deleteTarget.id)
+          }
+        }}
+      />
+
+      <ConfirmDialog
+        open={!!statusTarget}
+        title={
+          statusTarget?.nextActive ? 'Enable teacher login?' : 'Disable teacher login?'
+        }
+        description={
+          statusTarget
+            ? `${statusTarget.linkedUser.fullName} will be ${
+                statusTarget.nextActive ? 'enabled' : 'disabled'
+              }.`
+            : undefined
+        }
+        confirmLabel={statusTarget?.nextActive ? 'Enable' : 'Disable'}
+        tone={statusTarget?.nextActive ? 'brand' : 'danger'}
+        isLoading={statusMutation.isPending}
+        onCancel={() => setStatusTarget(null)}
+        onConfirm={() => {
+          if (statusTarget) {
+            statusMutation.mutate(statusTarget)
           }
         }}
       />

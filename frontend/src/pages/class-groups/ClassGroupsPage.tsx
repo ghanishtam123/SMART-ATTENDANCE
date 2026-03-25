@@ -16,7 +16,6 @@ import SidePanel from '../../components/common/SidePanel'
 import StatusBadge from '../../components/common/StatusBadge'
 import FormActions from '../../components/forms/FormActions'
 import InputField from '../../components/forms/InputField'
-import SelectField from '../../components/forms/SelectField'
 import DataTable, { type DataTableColumn } from '../../components/tables/DataTable'
 import TableActions from '../../components/tables/TableActions'
 import { routes } from '../../constants/routes'
@@ -288,7 +287,39 @@ function ClassGroupsPage() {
         eyebrow="Academics"
         title="Class Groups"
         description="Manage academic cohorts, sections, and intake structure."
-        actions={
+      />
+
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
+        <SearchInput
+          wrapperClassName="xl:flex-1"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          onClear={() => setSearch('')}
+          placeholder="Search by name, code, department, or academic year"
+        />
+        <div className="flex flex-col gap-3 sm:flex-row xl:items-center">
+          <label className="flex h-12 min-w-[170px] items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 shadow-sm transition focus-within:border-brand-200 focus-within:ring-4 focus-within:ring-brand-100/70">
+            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-ink-400">
+              Status
+            </span>
+            <select
+              value={activeFilter}
+              onChange={(event) =>
+                setActiveFilter(event.target.value as 'active' | 'inactive' | '')
+              }
+              className="w-full bg-transparent text-sm text-ink-950 outline-none"
+            >
+              {[
+                { value: '', label: 'All statuses' },
+                { value: 'active', label: 'Active' },
+                { value: 'inactive', label: 'Inactive' },
+              ].map((option) => (
+                <option key={option.value || 'all'} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
           <button
             type="button"
             onClick={() => {
@@ -296,33 +327,12 @@ function ClassGroupsPage() {
               setFormError(null)
               setSheetOpen(true)
             }}
-            className="inline-flex items-center gap-2 rounded-2xl bg-ink-950 px-4 py-3 text-sm font-medium text-white transition hover:bg-ink-800"
+            className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-ink-950 px-4 text-sm font-medium whitespace-nowrap text-white transition hover:bg-ink-800"
           >
             <Plus className="h-4 w-4" />
             Add class group
           </button>
-        }
-      />
-
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_220px]">
-        <SearchInput
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          onClear={() => setSearch('')}
-          placeholder="Search by name, code, department, or academic year"
-        />
-        <SelectField
-          label="Status"
-          value={activeFilter}
-          options={[
-            { value: '', label: 'All statuses' },
-            { value: 'active', label: 'Active' },
-            { value: 'inactive', label: 'Inactive' },
-          ]}
-          onChange={(event) =>
-            setActiveFilter(event.target.value as 'active' | 'inactive' | '')
-          }
-        />
+        </div>
       </div>
 
       {classGroupsQuery.isError ? (

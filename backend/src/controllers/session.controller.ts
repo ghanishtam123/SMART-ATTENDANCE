@@ -33,6 +33,19 @@ const createSession = asyncHandler(async (req, res) => {
   });
 });
 
+const createSessionFromTimetable = asyncHandler(async (req, res) => {
+  const result = await sessionService.createStartedSessionFromTimetable(
+    String(req.body.timetableEntryId),
+    req.user!,
+    buildAuditContext(req),
+  );
+
+  return ApiResponse.success(res, {
+    message: 'Session started from timetable successfully.',
+    data: result,
+  });
+});
+
 const updateSession = asyncHandler(async (req, res) => {
   const result = await sessionService.updateSession(String(req.params.id), req.body);
 
@@ -97,6 +110,7 @@ export const sessionController = {
   listSessions,
   getSessionById,
   createSession,
+  createSessionFromTimetable,
   updateSession,
   deleteSession,
   startSession,

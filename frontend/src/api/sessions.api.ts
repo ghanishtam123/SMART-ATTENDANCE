@@ -1,6 +1,7 @@
 import client, { getApiData, getPaginatedApiData } from './client'
 import type { ApiResponse, PaginationMeta } from '../types/common'
 import type {
+  CreateSessionFromTimetableInput,
   CreateSessionInput,
   Session,
   SessionListQuery,
@@ -23,6 +24,15 @@ export const sessionsApi = {
 
   createSession: async (payload: CreateSessionInput) => {
     const response = await client.post<ApiResponse<Session>>('/sessions', payload)
+    return getApiData(response)
+  },
+
+  createSessionFromTimetable: async (payload: CreateSessionFromTimetableInput) => {
+    const response = await client.post<ApiResponse<Session>>(
+      '/sessions/from-timetable',
+      payload,
+    )
+
     return getApiData(response)
   },
 

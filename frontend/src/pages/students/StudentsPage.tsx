@@ -43,28 +43,17 @@ interface StudentFormValues {
   gender: '' | StudentGender
   classGroupId: string
   status: StudentStatus
-  createLoginAccount: boolean
-  userId: string
   login: {
     email: string
     password: string
-    isActive: boolean
   }
 }
-
-const isValidOptionalEmail = (value: string) =>
-  !value || z.string().email().safeParse(value).success
 
 const studentFormSchemaBase = z.object({
   firstName: z.string().trim().min(2, 'First name must be at least 2 characters.'),
   lastName: z.string().trim().min(1, 'Last name is required.'),
   rollNumber: z.string().trim().min(1, 'Roll number is required.'),
-  email: z
-    .string()
-    .trim()
-    .refine(isValidOptionalEmail, {
-      message: 'Enter a valid email address.',
-    }),
+  email: z.string().trim().email('Enter a valid email address.'),
   phone: z
     .string()
     .trim()
@@ -74,17 +63,9 @@ const studentFormSchemaBase = z.object({
   gender: z.enum(['', 'male', 'female', 'other']),
   classGroupId: z.string().trim().min(1, 'Select a class group.'),
   status: z.enum(['active', 'inactive']),
-  createLoginAccount: z.boolean(),
-  userId: z.string(),
   login: z.object({
-    email: z
-      .string()
-      .trim()
-      .refine(isValidOptionalEmail, {
-        message: 'Enter a valid login email address.',
-      }),
-    password: z.string(),
-    isActive: z.boolean(),
+    email: z.string().trim().email('Enter a valid login email address.'),
+    password: z.string().trim().min(8, 'Password must be at least 8 characters.'),
   }),
 })
 
@@ -94,40 +75,12 @@ const buildStudentFormSchema = (isEditMode: boolean) =>
       return
     }
 
-    if (value.createLoginAccount) {
-      if (!value.login.email.trim()) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['login', 'email'],
-          message: 'Login email is required when login creation is enabled.',
-        })
-      }
-
-      if (value.login.password.trim().length < 8) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['login', 'password'],
-          message: 'Password must be at least 8 characters.',
-        })
-      }
-
-      if (
-        value.email.trim() &&
-        value.login.email.trim() &&
-        value.email.trim().toLowerCase() !== value.login.email.trim().toLowerCase()
-      ) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['login', 'email'],
-          message: 'Student email and login email must match.',
-        })
-      }
-
-      return
-    }
-
-    if (!value.userId.trim()) {
-      return
+    if (value.email.trim().toLowerCase() !== value.login.email.trim().toLowerCase()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['login', 'email'],
+        message: 'Student email and login email must match.',
+      })
     }
   })
 
@@ -155,19 +108,15 @@ const getDefaultValues = (
   gender: (student?.gender ?? '') as '' | StudentGender,
   classGroupId: student?.classGroupId ?? '',
   status: (student?.status ?? 'active') as StudentStatus,
-  createLoginAccount: false,
-  userId: student?.userId ?? '',
   login: {
     email: student?.email ?? linkedUser?.email ?? '',
     password: '',
-    isActive: linkedUser?.isActive ?? true,
   },
 })
 
 interface StudentFormProps {
   student?: Student | null
   linkedUser?: User | null
-  userOptions: Array<{ label: string; value: string }>
   classGroupOptions: Array<{ label: string; value: string }>
   submitError: string | null
   referenceError?: string | null
@@ -179,7 +128,6 @@ interface StudentFormProps {
 function StudentForm({
   student,
   linkedUser,
-  userOptions,
   classGroupOptions,
   submitError,
   referenceError,
@@ -200,10 +148,6 @@ function StudentForm({
     defaultValues: getDefaultValues(student, linkedUser),
   })
 
-  const createLoginAccount = useWatch({
-    control,
-    name: 'createLoginAccount',
-  })
   const studentEmail = useWatch({
     control,
     name: 'email',
@@ -218,7 +162,7 @@ function StudentForm({
   }, [linkedUser, reset, student])
 
   useEffect(() => {
-    if (isEditMode || !createLoginAccount || !studentEmail.trim() || loginEmail.trim()) {
+    if (isEditMode || !studentEmail.trim() || loginEmail.trim()) {
       return
     }
 
@@ -226,7 +170,7 @@ function StudentForm({
       shouldDirty: true,
       shouldValidate: false,
     })
-  }, [createLoginAccount, isEditMode, loginEmail, setValue, studentEmail])
+  }, [isEditMode, loginEmail, setValue, studentEmail])
 
   return (
     <form className="space-y-5" onSubmit={handleSubmit(onSubmit)}>
@@ -290,9 +234,7 @@ function StudentForm({
       <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm">
         <div className="mb-5 space-y-1">
           <h3 className="text-base font-semibold text-ink-950">Academic Details</h3>
-          <p className="text-sm text-ink-500">
-            Group mapping and operational status used by attendance modules.
-          </p>
+          <p className="text-sm text-ink-500">Group and status settings.</p>
         </div>
 
         <div className="grid gap-5 md:grid-cols-2">
@@ -315,10 +257,10 @@ function StudentForm({
       <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm">
         <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
           <div className="space-y-1">
-            <h3 className="text-base font-semibold text-ink-950">Login Account Setup</h3>
-            <p className="text-sm text-ink-500">
-              Enable student portal access from the same student creation flow.
-            </p>
+            <h3 className="text-base font-semibold text-ink-950">
+              Student Login Account (Required)
+            </h3>
+            <p className="text-sm text-ink-500">Login is created automatically.</p>
           </div>
           {isEditMode ? (
             <StatusBadge
@@ -342,85 +284,30 @@ function StudentForm({
               <div className="space-y-1">
                 <p className="font-medium text-ink-900">{linkedUser.fullName}</p>
                 <p>{linkedUser.email}</p>
-                <p className="text-xs text-ink-500">
-                  Manage password and active status from the Users module.
-                </p>
+                <p className="text-xs text-ink-500">Password is managed separately.</p>
               </div>
             ) : (
-              <p>No linked login account is attached to this student yet.</p>
+              <p>No linked login account.</p>
             )}
           </div>
         ) : (
-          <div className="space-y-4">
-            <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-ink-700">
-              <input
-                type="checkbox"
-                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200"
-                {...register('createLoginAccount')}
+          <div className="rounded-2xl border border-brand-100 bg-brand-50/40 p-4">
+            <div className="grid gap-5 md:grid-cols-2">
+              <InputField
+                label="Login email"
+                type="email"
+                placeholder="amit@example.com"
+                error={errors.login?.email?.message}
+                {...register('login.email')}
               />
-              <span className="space-y-1">
-                <span className="block font-medium text-ink-950">
-                  Create linked student login account
-                </span>
-                <span className="block text-ink-500">
-                  If enabled, the student can sign in using the same email and a
-                  generated user account.
-                </span>
-              </span>
-            </label>
-
-            {createLoginAccount ? (
-              <div className="rounded-2xl border border-brand-100 bg-brand-50/40 p-4">
-                <div className="mb-4 space-y-1">
-                  <p className="text-sm font-semibold text-ink-950">Login Account Setup</p>
-                  <p className="text-sm text-ink-500">
-                    These credentials will create the linked student user account.
-                  </p>
-                </div>
-
-                <div className="grid gap-5 md:grid-cols-2">
-                  <InputField
-                    label="Login email"
-                    type="email"
-                    placeholder="amit@example.com"
-                    error={errors.login?.email?.message}
-                    {...register('login.email')}
-                  />
-                  <InputField
-                    label="Temporary password"
-                    type="password"
-                    placeholder="Student@123"
-                    error={errors.login?.password?.message}
-                    {...register('login.password')}
-                  />
-                </div>
-
-                <label className="mt-4 flex items-start gap-3 rounded-2xl border border-white/70 bg-white/80 px-4 py-4 text-sm text-ink-700">
-                  <input
-                    type="checkbox"
-                    className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200"
-                    {...register('login.isActive')}
-                  />
-                  <span className="space-y-1">
-                    <span className="block font-medium text-ink-950">
-                      Keep login account active
-                    </span>
-                    <span className="block text-ink-500">
-                      Disable this if the login should be created but not usable yet.
-                    </span>
-                  </span>
-                </label>
-              </div>
-            ) : (
-              <SelectField
-                label="Link existing student login"
-                options={userOptions}
-                placeholder="Optional existing student user"
-                hint="Leave blank to create only the student record."
-                error={errors.userId?.message}
-                {...register('userId')}
+              <InputField
+                label="Temporary Password"
+                type="password"
+                placeholder="Student@123"
+                error={errors.login?.password?.message}
+                {...register('login.password')}
               />
-            )}
+            </div>
           </div>
         )}
       </div>
@@ -493,15 +380,6 @@ function StudentsPage() {
     [classGroupsQuery.data?.items],
   )
 
-  const userOptions = useMemo(
-    () =>
-      (studentUsersQuery.data?.items ?? []).map((user) => ({
-        value: user.id,
-        label: `${user.fullName} • ${user.email}`,
-      })),
-    [studentUsersQuery.data?.items],
-  )
-
   const classGroupOptions = useMemo(
     () =>
       (classGroupsQuery.data?.items ?? []).map((group) => ({
@@ -556,17 +434,13 @@ function StudentsPage() {
 
       const payload: CreateStudentPayload = {
         ...basePayload,
-        createLoginAccount: values.createLoginAccount,
-      }
-
-      if (values.createLoginAccount) {
-        payload.login = {
-          email: values.login.email.trim(),
+        email: values.email.trim(),
+        createLoginAccount: true,
+        login: {
+          email: values.login.email.trim().toLowerCase(),
           password: values.login.password,
-          isActive: values.login.isActive,
-        }
-      } else if (values.userId.trim()) {
-        payload.userId = values.userId.trim()
+          isActive: true,
+        },
       }
 
       return studentsApi.createStudent(payload)
@@ -705,22 +579,7 @@ function StudentsPage() {
         ]}
         eyebrow="Academics"
         title="Students"
-        description="Create student records and optionally provision linked student login accounts in the same flow."
-        actions={
-          <button
-            type="button"
-            onClick={() => {
-              setEditingStudent(null)
-              setFormError(null)
-              setSuccessMessage(null)
-              setSheetOpen(true)
-            }}
-            className="inline-flex items-center gap-2 rounded-2xl bg-ink-950 px-4 py-3 text-sm font-medium text-white transition hover:bg-ink-800"
-          >
-            <Plus className="h-4 w-4" />
-            Add student
-          </button>
-        }
+        description="Create student records and required linked student login accounts in the same flow."
       />
 
       {successMessage ? (
@@ -729,27 +588,63 @@ function StudentsPage() {
         </div>
       ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_220px_260px]">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
         <SearchInput
+          wrapperClassName="xl:flex-1"
           value={search}
           onChange={(event) => setSearch(event.target.value)}
           onClear={() => setSearch('')}
           placeholder="Search by name, roll number, or email"
         />
-        <SelectField
-          label="Status"
-          value={statusFilter}
-          options={[{ value: '', label: 'All statuses' }, ...studentStatusOptions]}
-          onChange={(event) =>
-            setStatusFilter(event.target.value as StudentStatus | '')
-          }
-        />
-        <SelectField
-          label="Class group"
-          value={classGroupFilter}
-          options={[{ value: '', label: 'All class groups' }, ...classGroupOptions]}
-          onChange={(event) => setClassGroupFilter(event.target.value)}
-        />
+        <div className="flex flex-col gap-3 sm:flex-row xl:items-center">
+          <label className="flex h-12 min-w-[170px] items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 shadow-sm transition focus-within:border-brand-200 focus-within:ring-4 focus-within:ring-brand-100/70">
+            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-ink-400">
+              Status
+            </span>
+            <select
+              value={statusFilter}
+              onChange={(event) =>
+                setStatusFilter(event.target.value as StudentStatus | '')
+              }
+              className="w-full bg-transparent text-sm text-ink-950 outline-none"
+            >
+              {[{ value: '', label: 'All statuses' }, ...studentStatusOptions].map((option) => (
+                <option key={option.value || 'all'} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex h-12 min-w-[220px] items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 shadow-sm transition focus-within:border-brand-200 focus-within:ring-4 focus-within:ring-brand-100/70">
+            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-ink-400">
+              Group
+            </span>
+            <select
+              value={classGroupFilter}
+              onChange={(event) => setClassGroupFilter(event.target.value)}
+              className="w-full bg-transparent text-sm text-ink-950 outline-none"
+            >
+              {[{ value: '', label: 'All class groups' }, ...classGroupOptions].map((option) => (
+                <option key={option.value || 'all'} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            onClick={() => {
+              setEditingStudent(null)
+              setFormError(null)
+              setSuccessMessage(null)
+              setSheetOpen(true)
+            }}
+            className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-ink-950 px-4 text-sm font-medium whitespace-nowrap text-white transition hover:bg-ink-800"
+          >
+            <Plus className="h-4 w-4" />
+            Add student
+          </button>
+        </div>
       </div>
 
       {studentsQuery.isError ? (
@@ -766,14 +661,14 @@ function StudentsPage() {
           columns={columns}
           getRowKey={(student) => student.id}
           emptyTitle="No students found."
-          emptyDescription="Create the first student record or adjust the selected filters."
+          emptyDescription="Create the first student record and linked login account or adjust the selected filters."
         />
       )}
 
       <SidePanel
         open={sheetOpen}
         title={editingStudent ? 'Edit student' : 'Create student'}
-        description="Students can be created as records only or with a linked portal login in the same admin flow."
+        description="Create a student and login account."
         onClose={() => {
           setSheetOpen(false)
           setEditingStudent(null)
@@ -786,7 +681,6 @@ function StudentsPage() {
           <StudentForm
             student={editingStudent}
             linkedUser={activeLinkedUser}
-            userOptions={userOptions}
             classGroupOptions={classGroupOptions}
             submitError={formError}
             referenceError={referenceError}

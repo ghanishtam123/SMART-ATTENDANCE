@@ -11,6 +11,7 @@ import TeacherProfileModel from '../models/TeacherProfile.model';
 import UnknownFaceAlertModel from '../models/UnknownFaceAlert.model';
 import { AuthenticatedUser } from '../types/auth.types';
 import { AppError } from '../utils/AppError';
+import { sessionService } from './session.service';
 
 interface ActiveSessionsQuery {
   limit?: number;
@@ -76,6 +77,10 @@ export const liveService = {
     query: ActiveSessionsQuery,
     currentUser: AuthenticatedUser,
   ): Promise<unknown[]> => {
+    await sessionService.autoCompleteOverdueSessions({
+      trigger: 'live_read',
+    });
+
     const limit = query.limit ?? 10;
     const teacherProfileId = await getTeacherProfileIdOrThrow(currentUser);
     const sessions = await SessionModel.find({
@@ -129,6 +134,11 @@ export const liveService = {
     sessionId: string,
     currentUser: AuthenticatedUser,
   ): Promise<unknown> => {
+    await sessionService.autoCompleteOverdueSessions({
+      sessionId,
+      trigger: 'live_read',
+    });
+
     const session = await getSessionOrThrow(sessionId);
     await assertTeacherCanAccessSession(session.teacherId, currentUser);
 
@@ -252,6 +262,11 @@ export const liveService = {
     query: RecentItemsQuery,
     currentUser: AuthenticatedUser,
   ): Promise<unknown[]> => {
+    await sessionService.autoCompleteOverdueSessions({
+      sessionId,
+      trigger: 'live_read',
+    });
+
     const session = await getSessionOrThrow(sessionId);
     await assertTeacherCanAccessSession(session.teacherId, currentUser);
 
@@ -314,6 +329,11 @@ export const liveService = {
     query: RecentItemsQuery,
     currentUser: AuthenticatedUser,
   ): Promise<unknown[]> => {
+    await sessionService.autoCompleteOverdueSessions({
+      sessionId,
+      trigger: 'live_read',
+    });
+
     const session = await getSessionOrThrow(sessionId);
     await assertTeacherCanAccessSession(session.teacherId, currentUser);
 

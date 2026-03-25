@@ -38,6 +38,10 @@ export const updateSessionSchema = createSessionSchema.partial();
 
 export const sessionIdParamSchema = idParamSchema;
 
+export const createSessionFromTimetableSchema = z.object({
+  timetableEntryId: objectIdSchema,
+});
+
 export const sessionListQuerySchema = paginationQuerySchema.extend({
   scheduledDate: dateStringSchema.optional(),
   teacherId: objectIdSchema.optional(),

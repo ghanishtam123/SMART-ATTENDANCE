@@ -44,22 +44,21 @@ export interface StudentListQuery extends PaginationQuery {
 export interface StudentLoginDetails {
   email: string
   password: string
-  isActive?: boolean
+  isActive: boolean
 }
 
 export interface CreateStudentPayload {
   firstName: string
   lastName: string
   rollNumber: string
-  email?: string
+  email: string
   phone?: string
   gender?: StudentGender
-  userId?: string
   classGroupId: string
   status?: StudentStatus
   faceProfileId?: string
-  createLoginAccount?: boolean
-  login?: StudentLoginDetails
+  createLoginAccount: true
+  login: StudentLoginDetails
 }
 
 export type CreateStudentInput = CreateStudentPayload

@@ -22,8 +22,10 @@ import PageHeader from '../../components/common/PageHeader'
 import StatCard from '../../components/common/StatCard'
 import StatusBadge from '../../components/common/StatusBadge'
 import { routes } from '../../constants/routes'
+import { useAuth } from '../../hooks/useAuth'
 import type { Session, SessionStatus } from '../../types/session'
 import { formatDate, formatDateTime, formatTimeRange, getErrorMessage } from '../../utils/format'
+import { isAdminRole } from '../../utils/role'
 
 type SessionActionType = 'start' | 'complete' | 'archive'
 
@@ -62,6 +64,7 @@ function DetailRow({
 
 function SessionDetailsPage() {
   const { sessionId } = useParams<{ sessionId: string }>()
+  const { role } = useAuth()
   const queryClient = useQueryClient()
   const [actionTarget, setActionTarget] = useState<{
     session: Session
@@ -89,8 +92,11 @@ function SessionDetailsPage() {
     queryFn: () => teachersApi.listTeachers({ page: 1, limit: 100 }),
   })
 
+  const shouldLoadTeacherUsers = isAdminRole(role)
+
   const teacherUsersQuery = useQuery({
     queryKey: ['users', 'session-detail-teacher-options'],
+    enabled: shouldLoadTeacherUsers,
     queryFn: () => usersApi.listUsers({ page: 1, limit: 100, role: 'teacher' }),
   })
 
@@ -147,7 +153,7 @@ function SessionDetailsPage() {
           const linkedUser = teacher.userId ? teacherUserMap.get(teacher.userId) : null
           const label = linkedUser
             ? `${linkedUser.fullName} • ${teacher.employeeId}`
-            : teacher.employeeId
+            : `${teacher.designation} • ${teacher.employeeId}`
 
           return [teacher.id, label] as const
         }),
@@ -166,7 +172,7 @@ function SessionDetailsPage() {
       teacherProfilesQuery.isError
         ? getErrorMessage(teacherProfilesQuery.error, 'Unable to load teachers.')
         : null,
-      teacherUsersQuery.isError
+      shouldLoadTeacherUsers && teacherUsersQuery.isError
         ? getErrorMessage(teacherUsersQuery.error, 'Unable to load teacher users.')
         : null,
       classroomsQuery.isError
@@ -184,6 +190,7 @@ function SessionDetailsPage() {
     subjectsQuery.isError,
     teacherProfilesQuery.error,
     teacherProfilesQuery.isError,
+    shouldLoadTeacherUsers,
     teacherUsersQuery.error,
     teacherUsersQuery.isError,
   ])

@@ -7,6 +7,7 @@ import {
 
 export interface Session {
   title: string | null;
+  timetableEntryId?: Types.ObjectId | null;
   classGroupId: Types.ObjectId;
   subjectId: Types.ObjectId;
   teacherId: Types.ObjectId;
@@ -34,6 +35,12 @@ const sessionSchema = new Schema<Session>(
       type: String,
       trim: true,
       default: null,
+    },
+    timetableEntryId: {
+      type: Schema.Types.ObjectId,
+      ref: 'TimetableEntry',
+      default: null,
+      index: true,
     },
     classGroupId: {
       type: Schema.Types.ObjectId,
@@ -120,6 +127,9 @@ const sessionSchema = new Schema<Session>(
       transform: (_doc, ret: Record<string, unknown>) => {
         ret.id = String(ret._id);
         delete ret.__v;
+        ret.timetableEntryId = ret.timetableEntryId
+          ? String(ret.timetableEntryId)
+          : null;
         ret.classGroupId = ret.classGroupId ? String(ret.classGroupId) : null;
         ret.subjectId = ret.subjectId ? String(ret.subjectId) : null;
         ret.teacherId = ret.teacherId ? String(ret.teacherId) : null;
@@ -136,6 +146,7 @@ sessionSchema.index({ classGroupId: 1, scheduledDate: 1 });
 sessionSchema.index({ subjectId: 1, scheduledDate: 1 });
 sessionSchema.index({ classroomId: 1, status: 1 });
 sessionSchema.index({ cameraIds: 1 });
+sessionSchema.index({ timetableEntryId: 1, scheduledDate: 1 });
 
 const SessionModel = models.Session || model<Session>('Session', sessionSchema);
 

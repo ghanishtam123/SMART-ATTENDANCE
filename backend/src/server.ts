@@ -4,11 +4,14 @@ import app from './app';
 import { connectDatabase, disconnectDatabase } from './config/db';
 import env from './config/env';
 import logger from './config/logger';
+import { sessionSchedulerService } from './services/sessionScheduler.service';
 
 let server: http.Server | null = null;
 
 const shutdown = async (signal: string): Promise<void> => {
   logger.info(`Received ${signal}. Shutting down gracefully.`);
+
+  sessionSchedulerService.stop();
 
   if (!server) {
     await disconnectDatabase();
@@ -23,6 +26,7 @@ const shutdown = async (signal: string): Promise<void> => {
 
 const startServer = async (): Promise<void> => {
   await connectDatabase();
+  sessionSchedulerService.start();
 
   server = http.createServer(app);
 

@@ -22,18 +22,17 @@ export interface TeacherLoginDetails {
   fullName: string
   email: string
   password: string
-  isActive?: boolean
+  isActive: boolean
 }
 
 export interface CreateTeacherPayload {
-  userId?: string
   employeeId: string
   department: string
   designation: string
   subjectsTaught?: string[]
   assignedClassGroups?: string[]
-  createLoginAccount?: boolean
-  login?: TeacherLoginDetails
+  createLoginAccount: true
+  login: TeacherLoginDetails
 }
 
 export type CreateTeacherInput = CreateTeacherPayload

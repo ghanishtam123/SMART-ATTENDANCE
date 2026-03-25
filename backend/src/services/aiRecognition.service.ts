@@ -7,6 +7,7 @@ import StudentModel from '../models/Student.model';
 import UnknownFaceAlertModel from '../models/UnknownFaceAlert.model';
 import { RecognitionBatchPayload } from '../types/ai.types';
 import { AppError } from '../utils/AppError';
+import { sessionService } from './session.service';
 
 interface IngestionSummary {
   sessionId: string;
@@ -22,6 +23,11 @@ export const aiRecognitionService = {
   ingestRecognitionEvents: async (
     payload: RecognitionBatchPayload,
   ): Promise<IngestionSummary> => {
+    await sessionService.autoCompleteOverdueSessions({
+      sessionId: payload.sessionId,
+      trigger: 'ingestion',
+    });
+
     const session = (await SessionModel.findById(payload.sessionId)
       .select('_id status cameraIds')
       .lean()) as {

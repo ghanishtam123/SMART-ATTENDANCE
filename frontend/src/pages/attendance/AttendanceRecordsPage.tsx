@@ -66,14 +66,14 @@ function AttendanceRecordsPage() {
     queryFn: () =>
       attendanceApi.getSessionAttendanceRecords(selectedSessionId, {
         page: 1,
-        limit: 200,
+        limit: 100,
         status: statusFilter || undefined,
       }),
   })
 
   const studentsQuery = useQuery({
     queryKey: ['students', 'attendance-records-reference'],
-    queryFn: () => studentsApi.listStudents({ page: 1, limit: 200 }),
+    queryFn: () => studentsApi.listStudents({ page: 1, limit: 100 }),
   })
 
   const classGroupsQuery = useQuery({

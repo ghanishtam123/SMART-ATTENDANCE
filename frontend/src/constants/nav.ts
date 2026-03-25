@@ -8,7 +8,7 @@ import {
   LayoutDashboard,
   MonitorPlay,
   School,
-  Users,
+  ShieldCheck,
   UserSquare2,
 } from 'lucide-react'
 
@@ -45,10 +45,10 @@ const dashboardItem: NavItem = {
   ],
 }
 
-const usersItem: NavItem = {
-  label: 'Users',
-  to: routes.users,
-  icon: Users,
+const adminsItem: NavItem = {
+  label: 'Admins',
+  to: routes.admins,
+  icon: ShieldCheck,
 }
 
 const studentsItem: NavItem = {
@@ -122,17 +122,28 @@ const liveMonitoringItem: NavItem = {
   icon: MonitorPlay,
 }
 
-const myProfileItem: NavItem = {
+const teacherProfileItem: NavItem = {
+  label: 'My Profile',
+  to: routes.teacherMyProfile,
+  icon: UserSquare2,
+}
+
+const studentProfileItem: NavItem = {
   label: 'My Profile',
   to: routes.myProfile,
   icon: UserSquare2,
 }
 
-const myAttendanceItem: NavItem = {
-  label: 'My Attendance',
+const attendanceOverviewItem: NavItem = {
+  label: 'My Attendance Overview',
   to: routes.myAttendanceOverview,
   icon: ClipboardList,
-  matchPaths: [routes.myAttendanceOverview, routes.myAttendanceHistory],
+}
+
+const attendanceHistoryItem: NavItem = {
+  label: 'My Attendance History',
+  to: routes.myAttendanceHistory,
+  icon: ClipboardList,
 }
 
 const mySubjectsItem: NavItem = {
@@ -147,6 +158,25 @@ const mySessionHistoryItem: NavItem = {
   icon: CalendarClock,
 }
 
+const superAdminNavigation: NavSection[] = [
+  {
+    label: 'Overview',
+    items: [dashboardItem],
+  },
+  {
+    label: 'Management',
+    items: [adminsItem, teachersItem, studentsItem],
+  },
+  {
+    label: 'Academics',
+    items: [classGroupsItem, classroomsItem, subjectsItem, timetableItem],
+  },
+  {
+    label: 'Operations',
+    items: [sessionsItem, attendanceItem, alertsItem, analyticsItem, liveMonitoringItem],
+  },
+]
+
 const adminNavigation: NavSection[] = [
   {
     label: 'Overview',
@@ -154,7 +184,7 @@ const adminNavigation: NavSection[] = [
   },
   {
     label: 'Management',
-    items: [usersItem, studentsItem, teachersItem],
+    items: [teachersItem, studentsItem],
   },
   {
     label: 'Academics',
@@ -169,7 +199,7 @@ const adminNavigation: NavSection[] = [
 const teacherNavigation: NavSection[] = [
   {
     label: 'Overview',
-    items: [dashboardItem],
+    items: [dashboardItem, teacherProfileItem],
   },
   {
     label: 'Teaching',
@@ -188,12 +218,18 @@ const studentNavigation: NavSection[] = [
   },
   {
     label: 'Student Portal',
-    items: [myProfileItem, myAttendanceItem, mySubjectsItem, mySessionHistoryItem],
+    items: [
+      studentProfileItem,
+      attendanceOverviewItem,
+      attendanceHistoryItem,
+      mySubjectsItem,
+      mySessionHistoryItem,
+    ],
   },
 ]
 
 export const navSectionsByRole: Record<UserRole, NavSection[]> = {
-  super_admin: adminNavigation,
+  super_admin: superAdminNavigation,
   admin: adminNavigation,
   teacher: teacherNavigation,
   student: studentNavigation,

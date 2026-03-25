@@ -26,6 +26,7 @@ import TextAreaField from '../../components/forms/TextAreaField'
 import DataTable, { type DataTableColumn } from '../../components/tables/DataTable'
 import TableActions from '../../components/tables/TableActions'
 import { routes } from '../../constants/routes'
+import { useAuth } from '../../hooks/useAuth'
 import useDebounce from '../../hooks/useDebounce'
 import type {
   CreateSessionInput,
@@ -39,6 +40,7 @@ import {
   formatTimeRange,
   getErrorMessage,
 } from '../../utils/format'
+import { isAdminRole } from '../../utils/role'
 
 const statusOptions = [
   { value: '', label: 'All statuses' },
@@ -287,6 +289,7 @@ function SessionForm({
 }
 
 function SessionsPage() {
+  const { role } = useAuth()
   const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
   const [dateFilter, setDateFilter] = useState('')
@@ -341,8 +344,11 @@ function SessionsPage() {
     queryFn: () => teachersApi.listTeachers({ page: 1, limit: 100 }),
   })
 
+  const shouldLoadTeacherUsers = isAdminRole(role)
+
   const teacherUsersQuery = useQuery({
     queryKey: ['users', 'session-teacher-options'],
+    enabled: shouldLoadTeacherUsers,
     queryFn: () => usersApi.listUsers({ page: 1, limit: 100, role: 'teacher' }),
   })
 
@@ -399,7 +405,7 @@ function SessionsPage() {
           const linkedUser = teacher.userId ? teacherUserMap.get(teacher.userId) : null
           const label = linkedUser
             ? `${linkedUser.fullName} • ${teacher.employeeId}`
-            : teacher.employeeId
+            : `${teacher.designation} • ${teacher.employeeId}`
 
           return [teacher.id, label] as const
         }),
@@ -454,7 +460,7 @@ function SessionsPage() {
       teacherProfilesQuery.isError
         ? getErrorMessage(teacherProfilesQuery.error, 'Unable to load teachers.')
         : null,
-      teacherUsersQuery.isError
+      shouldLoadTeacherUsers && teacherUsersQuery.isError
         ? getErrorMessage(teacherUsersQuery.error, 'Unable to load teacher users.')
         : null,
       classroomsQuery.isError
@@ -472,6 +478,7 @@ function SessionsPage() {
     subjectsQuery.isError,
     teacherProfilesQuery.error,
     teacherProfilesQuery.isError,
+    shouldLoadTeacherUsers,
     teacherUsersQuery.error,
     teacherUsersQuery.isError,
   ])
@@ -706,7 +713,94 @@ function SessionsPage() {
         eyebrow="Operations"
         title="Sessions"
         description="Create and manage classroom sessions, then drive the session lifecycle from scheduled to archived."
-        actions={
+      />
+
+      {referenceError ? <ErrorMessage message={referenceError} /> : null}
+
+      <div className="flex flex-col gap-3 2xl:flex-row 2xl:items-center">
+        <SearchInput
+          wrapperClassName="2xl:flex-1"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          onClear={() => setSearch('')}
+          placeholder="Search by title or notes"
+        />
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap 2xl:flex-nowrap 2xl:items-center">
+          <label className="flex h-12 min-w-[155px] items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 shadow-sm transition focus-within:border-brand-200 focus-within:ring-4 focus-within:ring-brand-100/70">
+            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-ink-400">
+              Date
+            </span>
+            <input
+              type="date"
+              value={dateFilter}
+              onChange={(event) => setDateFilter(event.target.value)}
+              className="w-full bg-transparent text-sm text-ink-950 outline-none"
+            />
+          </label>
+          <label className="flex h-12 min-w-[160px] items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 shadow-sm transition focus-within:border-brand-200 focus-within:ring-4 focus-within:ring-brand-100/70">
+            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-ink-400">
+              Status
+            </span>
+            <select
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value as SessionStatus | '')}
+              className="w-full bg-transparent text-sm text-ink-950 outline-none"
+            >
+              {statusOptions.map((option) => (
+                <option key={option.value || 'all'} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex h-12 min-w-[180px] items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 shadow-sm transition focus-within:border-brand-200 focus-within:ring-4 focus-within:ring-brand-100/70">
+            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-ink-400">
+              Group
+            </span>
+            <select
+              value={classGroupFilter}
+              onChange={(event) => setClassGroupFilter(event.target.value)}
+              className="w-full bg-transparent text-sm text-ink-950 outline-none"
+            >
+              {[{ value: '', label: 'All class groups' }, ...classGroupOptions].map((option) => (
+                <option key={option.value || 'all'} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex h-12 min-w-[180px] items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 shadow-sm transition focus-within:border-brand-200 focus-within:ring-4 focus-within:ring-brand-100/70">
+            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-ink-400">
+              Teacher
+            </span>
+            <select
+              value={teacherFilter}
+              onChange={(event) => setTeacherFilter(event.target.value)}
+              className="w-full bg-transparent text-sm text-ink-950 outline-none"
+            >
+              {[{ value: '', label: 'All teachers' }, ...teacherOptions].map((option) => (
+                <option key={option.value || 'all'} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex h-12 min-w-[180px] items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 shadow-sm transition focus-within:border-brand-200 focus-within:ring-4 focus-within:ring-brand-100/70">
+            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-ink-400">
+              Subject
+            </span>
+            <select
+              value={subjectFilter}
+              onChange={(event) => setSubjectFilter(event.target.value)}
+              className="w-full bg-transparent text-sm text-ink-950 outline-none"
+            >
+              {[{ value: '', label: 'All subjects' }, ...subjectOptions].map((option) => (
+                <option key={option.value || 'all'} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
           <button
             type="button"
             onClick={() => {
@@ -714,56 +808,12 @@ function SessionsPage() {
               setFormError(null)
               setSheetOpen(true)
             }}
-            className="inline-flex items-center gap-2 rounded-2xl bg-ink-950 px-4 py-3 text-sm font-medium text-white transition hover:bg-ink-800"
+            className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-ink-950 px-4 text-sm font-medium whitespace-nowrap text-white transition hover:bg-ink-800"
           >
             <Plus className="h-4 w-4" />
             Add session
           </button>
-        }
-      />
-
-      {referenceError ? <ErrorMessage message={referenceError} /> : null}
-
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        <label className="block space-y-2 md:col-span-2 xl:col-span-3">
-          <span className="text-sm font-medium text-ink-800">Search</span>
-          <SearchInput
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            onClear={() => setSearch('')}
-            placeholder="Search by title or notes"
-          />
-        </label>
-        <InputField
-          label="Date"
-          type="date"
-          value={dateFilter}
-          onChange={(event) => setDateFilter(event.target.value)}
-        />
-        <SelectField
-          label="Status"
-          value={statusFilter}
-          options={statusOptions}
-          onChange={(event) => setStatusFilter(event.target.value as SessionStatus | '')}
-        />
-        <SelectField
-          label="Class group"
-          value={classGroupFilter}
-          options={[{ value: '', label: 'All class groups' }, ...classGroupOptions]}
-          onChange={(event) => setClassGroupFilter(event.target.value)}
-        />
-        <SelectField
-          label="Teacher"
-          value={teacherFilter}
-          options={[{ value: '', label: 'All teachers' }, ...teacherOptions]}
-          onChange={(event) => setTeacherFilter(event.target.value)}
-        />
-        <SelectField
-          label="Subject"
-          value={subjectFilter}
-          options={[{ value: '', label: 'All subjects' }, ...subjectOptions]}
-          onChange={(event) => setSubjectFilter(event.target.value)}
-        />
+        </div>
       </div>
 
       {sessionsQuery.isError ? (
