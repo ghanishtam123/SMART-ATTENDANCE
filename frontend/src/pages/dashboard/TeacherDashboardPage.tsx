@@ -6,7 +6,7 @@ import {
   MapPin,
   Play,
 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { classGroupsApi } from '../../api/classGroups.api'
@@ -22,20 +22,9 @@ import PageHeader from '../../components/common/PageHeader'
 import StatusBadge from '../../components/common/StatusBadge'
 import { routes } from '../../constants/routes'
 import { useAuth } from '../../hooks/useAuth'
-import type { Session, SessionStatus } from '../../types/session'
+import type { Session } from '../../types/session'
 import type { TimetableDayOfWeek, TimetableEntry } from '../../types/timetable'
-import { formatDate, formatTimeRange, getErrorMessage } from '../../utils/format'
-
-const sessionStatusToneMap: Record<
-  SessionStatus,
-  'neutral' | 'brand' | 'success' | 'warning'
-> = {
-  created: 'neutral',
-  started: 'brand',
-  active: 'brand',
-  completed: 'success',
-  archived: 'warning',
-}
+import { formatDate, formatTime, formatTimeRange, getErrorMessage } from '../../utils/format'
 
 const weekdayLabels: TimetableDayOfWeek[] = [
   'sunday',
@@ -47,46 +36,91 @@ const weekdayLabels: TimetableDayOfWeek[] = [
   'saturday',
 ]
 
-const getTodayDate = () => new Date().toISOString().slice(0, 10)
-const getTodayDayOfWeek = (): TimetableDayOfWeek => weekdayLabels[new Date().getDay()]
+type TeacherDashboardState =
+  | 'upcoming'
+  | 'ready_to_start'
+  | 'running'
+  | 'completed'
+  | 'cancelled'
+  | 'missed'
 
-const getRuntimeState = (
+const getTodayDate = (date = new Date()) => {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+
+  return `${year}-${month}-${day}`
+}
+const getTodayDayOfWeek = (date = new Date()): TimetableDayOfWeek => weekdayLabels[date.getDay()]
+const getTimeValueInMinutes = (value: string) => {
+  const [hours = '0', minutes = '0'] = value.split(':')
+  return Number(hours) * 60 + Number(minutes)
+}
+
+const getTeacherDashboardState = (
   entry: TimetableEntry,
   linkedSession: Session | null,
-): {
-  badgeLabel: string
-  badgeTone: 'neutral' | 'brand' | 'success' | 'warning'
-  canStart: boolean
-} => {
+  nowMinutes: number,
+): TeacherDashboardState => {
   if (linkedSession) {
     if (linkedSession.status === 'active' || linkedSession.status === 'started') {
-      return {
-        badgeLabel: 'Running',
-        badgeTone: 'brand',
-        canStart: false,
-      }
+      return 'running'
     }
 
     if (linkedSession.status === 'completed' || linkedSession.status === 'archived') {
-      return {
-        badgeLabel: 'Completed',
-        badgeTone: 'success',
-        canStart: false,
-      }
-    }
-
-    return {
-      badgeLabel: linkedSession.status.charAt(0).toUpperCase() + linkedSession.status.slice(1),
-      badgeTone: sessionStatusToneMap[linkedSession.status],
-      canStart: true,
+      return 'completed'
     }
   }
 
-  return {
-    badgeLabel: entry.isActive ? 'Scheduled' : 'Inactive',
-    badgeTone: entry.isActive ? 'neutral' : 'warning',
-    canStart: entry.isActive,
+  if (!entry.isActive) {
+    return 'cancelled'
   }
+
+  const startMinutes = getTimeValueInMinutes(entry.startTime)
+  const endMinutes = getTimeValueInMinutes(entry.endTime)
+
+  if (nowMinutes < startMinutes) {
+    return 'upcoming'
+  }
+
+  if (nowMinutes >= endMinutes) {
+    return 'missed'
+  }
+
+  return 'ready_to_start'
+}
+
+const teacherDashboardStateMeta: Record<
+  TeacherDashboardState,
+  {
+    badgeLabel: string
+    badgeTone: 'neutral' | 'brand' | 'success' | 'warning' | 'danger'
+  }
+> = {
+  upcoming: {
+    badgeLabel: 'Upcoming',
+    badgeTone: 'neutral',
+  },
+  ready_to_start: {
+    badgeLabel: 'Ready to Start',
+    badgeTone: 'brand',
+  },
+  running: {
+    badgeLabel: 'Running',
+    badgeTone: 'brand',
+  },
+  completed: {
+    badgeLabel: 'Completed',
+    badgeTone: 'success',
+  },
+  cancelled: {
+    badgeLabel: 'Cancelled',
+    badgeTone: 'warning',
+  },
+  missed: {
+    badgeLabel: 'Missed',
+    badgeTone: 'danger',
+  },
 }
 
 function TeacherDashboardPage() {
@@ -94,9 +128,19 @@ function TeacherDashboardPage() {
   const { currentUser } = useAuth()
   const [actionError, setActionError] = useState<string | null>(null)
   const [startingEntryId, setStartingEntryId] = useState<string | null>(null)
+  const [now, setNow] = useState(() => new Date())
 
-  const today = useMemo(() => getTodayDate(), [])
-  const todayDay = useMemo(() => getTodayDayOfWeek(), [])
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setNow(new Date())
+    }, 60_000)
+
+    return () => window.clearInterval(intervalId)
+  }, [])
+
+  const today = useMemo(() => getTodayDate(now), [now])
+  const todayDay = useMemo(() => getTodayDayOfWeek(now), [now])
+  const nowMinutes = useMemo(() => now.getHours() * 60 + now.getMinutes(), [now])
 
   const teacherProfileQuery = useQuery({
     queryKey: ['teachers', 'dashboard-profile', currentUser?.id],
@@ -115,19 +159,20 @@ function TeacherDashboardPage() {
   const timetableQuery = useQuery({
     queryKey: ['timetable', 'teacher-dashboard', teacherProfileQuery.data?.id, todayDay],
     enabled: !!teacherProfileQuery.data?.id,
+    refetchInterval: 60_000,
     queryFn: () =>
       timetableApi.listTimetableEntries({
         page: 1,
         limit: 20,
         teacherId: teacherProfileQuery.data!.id,
         dayOfWeek: todayDay,
-        isActive: true,
       }),
   })
 
   const sessionsQuery = useQuery({
     queryKey: ['sessions', 'teacher-dashboard', teacherProfileQuery.data?.id, today],
     enabled: !!teacherProfileQuery.data?.id,
+    refetchInterval: 60_000,
     queryFn: () =>
       sessionsApi.listSessions({
         page: 1,
@@ -263,15 +308,129 @@ function TeacherDashboardPage() {
     classGroupsQuery.isLoading ||
     classroomsQuery.isLoading
 
-  const todayEntries = timetableQuery.data?.items ?? []
+  const todayEntries = useMemo(
+    () =>
+      [...(timetableQuery.data?.items ?? [])].sort(
+        (left, right) =>
+          getTimeValueInMinutes(left.startTime) - getTimeValueInMinutes(right.startTime),
+      ),
+    [timetableQuery.data?.items],
+  )
+
+  const dashboardEntries = useMemo(
+    () =>
+      todayEntries.map((entry) => {
+        const linkedSession = sessionsByTimetableId.get(entry.id) ?? null
+        const state = getTeacherDashboardState(entry, linkedSession, nowMinutes)
+
+        return {
+          entry,
+          linkedSession,
+          state,
+          statusMeta: teacherDashboardStateMeta[state],
+        }
+      }),
+    [nowMinutes, sessionsByTimetableId, todayEntries],
+  )
+
+  const renderEntryCard = (
+    entry: TimetableEntry,
+    linkedSession: Session | null,
+    state: TeacherDashboardState,
+  ) => (
+    <article key={entry.id} className="app-surface p-5">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="space-y-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="space-y-1">
+              <h2 className="text-xl font-semibold text-ink-950">
+                {subjectLabelMap.get(entry.subjectId ?? '') ?? 'Subject not linked'}
+              </h2>
+              <div className="flex flex-wrap items-center gap-3 text-sm text-ink-600">
+                <span className="inline-flex items-center gap-2">
+                  <Clock3 className="h-4 w-4 text-brand-600" />
+                  {formatTimeRange(entry.startTime, entry.endTime)}
+                </span>
+                <span className="inline-flex items-center gap-2">
+                  <BookOpen className="h-4 w-4 text-brand-600" />
+                  {classGroupLabelMap.get(entry.classGroupId ?? '') ?? 'Class group not linked'}
+                </span>
+                {entry.classroomId ? (
+                  <span className="inline-flex items-center gap-2">
+                    <MapPin className="h-4 w-4 text-brand-600" />
+                    {classroomLabelMap.get(entry.classroomId) ?? 'Classroom not linked'}
+                  </span>
+                ) : null}
+              </div>
+            </div>
+
+            <StatusBadge
+              label={teacherDashboardStateMeta[state].badgeLabel}
+              tone={teacherDashboardStateMeta[state].badgeTone}
+            />
+          </div>
+
+          {entry.notes ? <p className="text-sm leading-6 text-ink-500">{entry.notes}</p> : null}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          {state === 'running' && linkedSession ? (
+            <button
+              type="button"
+              onClick={() => navigate(routes.sessionDetails.replace(':sessionId', linkedSession.id))}
+              className="inline-flex min-h-11 items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-ink-700 transition hover:border-brand-200 hover:text-brand-700"
+            >
+              Go to Session
+            </button>
+          ) : null}
+
+          {state === 'completed' && linkedSession ? (
+            <button
+              type="button"
+              onClick={() => navigate(routes.sessionDetails.replace(':sessionId', linkedSession.id))}
+              className="inline-flex min-h-11 items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-ink-700 transition hover:border-brand-200 hover:text-brand-700"
+            >
+              View Session
+            </button>
+          ) : null}
+
+          {state === 'upcoming' ? (
+            <button
+              type="button"
+              disabled
+              className="inline-flex min-h-11 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-ink-500"
+            >
+              Starts at {formatTime(entry.startTime)}
+            </button>
+          ) : null}
+
+          {state === 'ready_to_start' ? (
+            <button
+              type="button"
+              onClick={() => {
+                void startSessionMutation.mutateAsync(entry)
+              }}
+              disabled={startSessionMutation.isPending && startingEntryId === entry.id}
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl bg-ink-950 px-4 py-3 text-sm font-medium text-white transition hover:bg-ink-800 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Play className="h-4 w-4" />
+              {startSessionMutation.isPending && startingEntryId === entry.id
+                ? 'Starting...'
+                : 'Start Session'}
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </article>
+  )
 
   return (
     <div className="space-y-6">
       <PageHeader
         breadcrumbs={[{ label: 'Dashboard', href: routes.dashboard }]}
         eyebrow="Teacher Overview"
-        title="Today's Classes"
-        description={`Review today's timetable and start attendance sessions when each class begins. ${formatDate(
+        title="Today's Timetable"
+        description={`Review today's classes and start attendance only when the timetable start time is reached. ${formatDate(
           today,
         )}`}
       />
@@ -293,81 +452,9 @@ function TeacherDashboardPage() {
         />
       ) : (
         <div className="grid gap-4">
-          {todayEntries.map((entry) => {
-            const linkedSession = sessionsByTimetableId.get(entry.id) ?? null
-            const runtimeState = getRuntimeState(entry, linkedSession)
-
-            return (
-              <article key={entry.id} className="app-surface p-5">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                  <div className="space-y-3">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                      <div className="space-y-1">
-                        <h2 className="text-xl font-semibold text-ink-950">
-                          {subjectLabelMap.get(entry.subjectId ?? '') ?? 'Subject not linked'}
-                        </h2>
-                        <div className="flex flex-wrap items-center gap-3 text-sm text-ink-600">
-                          <span className="inline-flex items-center gap-2">
-                            <Clock3 className="h-4 w-4 text-brand-600" />
-                            {formatTimeRange(entry.startTime, entry.endTime)}
-                          </span>
-                          <span className="inline-flex items-center gap-2">
-                            <BookOpen className="h-4 w-4 text-brand-600" />
-                            {classGroupLabelMap.get(entry.classGroupId ?? '') ?? 'Class group not linked'}
-                          </span>
-                          {entry.classroomId ? (
-                            <span className="inline-flex items-center gap-2">
-                              <MapPin className="h-4 w-4 text-brand-600" />
-                              {classroomLabelMap.get(entry.classroomId) ?? 'Classroom not linked'}
-                            </span>
-                          ) : null}
-                        </div>
-                      </div>
-
-                      <StatusBadge
-                        label={runtimeState.badgeLabel}
-                        tone={runtimeState.badgeTone}
-                      />
-                    </div>
-
-                    {entry.notes ? (
-                      <p className="text-sm leading-6 text-ink-500">{entry.notes}</p>
-                    ) : null}
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-3">
-                    {linkedSession ? (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          navigate(routes.sessionDetails.replace(':sessionId', linkedSession.id))
-                        }
-                        className="inline-flex min-h-11 items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-ink-700 transition hover:border-brand-200 hover:text-brand-700"
-                      >
-                        Open Session
-                      </button>
-                    ) : null}
-
-                    {runtimeState.canStart ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          void startSessionMutation.mutateAsync(entry)
-                        }}
-                        disabled={startSessionMutation.isPending && startingEntryId === entry.id}
-                        className="inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl bg-ink-950 px-4 py-3 text-sm font-medium text-white transition hover:bg-ink-800 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        <Play className="h-4 w-4" />
-                        {startSessionMutation.isPending && startingEntryId === entry.id
-                          ? 'Starting...'
-                          : 'Start Session'}
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-              </article>
-            )
-          })}
+          {dashboardEntries.map(({ entry, linkedSession, state }) =>
+            renderEntryCard(entry, linkedSession, state),
+          )}
         </div>
       )}
     </div>

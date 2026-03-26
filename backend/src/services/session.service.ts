@@ -7,6 +7,7 @@ import {
   SessionStatus,
 } from '../constants/session';
 import { UserRole } from '../constants/roles';
+import { TimetableDayOfWeek } from '../constants/timetable';
 import ClassGroupModel from '../models/ClassGroup.model';
 import ClassroomModel from '../models/Classroom.model';
 import SessionModel, { Session } from '../models/Session.model';
@@ -52,7 +53,13 @@ interface SessionPayload {
 
 interface AutoCompleteOverdueSessionsOptions {
   sessionId?: string;
-  trigger: 'scheduler' | 'session_read' | 'live_read' | 'ingestion';
+  trigger:
+    | 'scheduler'
+    | 'session_read'
+    | 'live_read'
+    | 'ingestion'
+    | 'timetable_start'
+    | 'manual_start';
   auditContext?: RequestAuditContext;
 }
 
@@ -122,12 +129,30 @@ const getTimeInMinutes = (timeValue: string): number => {
   return hours * 60 + minutes;
 };
 
+const padDatePart = (value: number): string => String(value).padStart(2, '0');
+
 const getDatePortion = (dateValue: Date): string => {
-  return dateValue.toISOString().slice(0, 10);
+  return `${dateValue.getFullYear()}-${padDatePart(
+    dateValue.getMonth() + 1,
+  )}-${padDatePart(dateValue.getDate())}`;
 };
 
 const getScheduledDateTime = (scheduledDate: Date, timeValue: string): Date => {
-  return new Date(`${getDatePortion(scheduledDate)}T${timeValue}:00.000Z`);
+  return new Date(`${getDatePortion(scheduledDate)}T${timeValue}:00`);
+};
+
+const getCurrentTimetableDayOfWeek = (dateValue: Date): TimetableDayOfWeek => {
+  const labels: TimetableDayOfWeek[] = [
+    TimetableDayOfWeek.SUNDAY,
+    TimetableDayOfWeek.MONDAY,
+    TimetableDayOfWeek.TUESDAY,
+    TimetableDayOfWeek.WEDNESDAY,
+    TimetableDayOfWeek.THURSDAY,
+    TimetableDayOfWeek.FRIDAY,
+    TimetableDayOfWeek.SATURDAY,
+  ];
+
+  return labels[dateValue.getDay()];
 };
 
 const getScheduledEndDateTime = (session: {
@@ -135,6 +160,13 @@ const getScheduledEndDateTime = (session: {
   scheduledEndTime: string;
 }): Date => {
   return getScheduledDateTime(session.scheduledDate, session.scheduledEndTime);
+};
+
+const getScheduledStartDateTime = (session: {
+  scheduledDate: Date;
+  scheduledStartTime: string;
+}): Date => {
+  return getScheduledDateTime(session.scheduledDate, session.scheduledStartTime);
 };
 
 const hasSessionReachedEndTime = (
@@ -149,6 +181,34 @@ const hasSessionReachedEndTime = (
     session.actualEndTime ?? getScheduledEndDateTime(session);
 
   return completionDeadline <= now;
+};
+
+const assertSessionCanStartWithinWindow = (
+  session: {
+    scheduledDate: Date;
+    scheduledStartTime: string;
+    scheduledEndTime: string;
+  },
+  now: Date,
+  earlyMessage: string,
+  lateMessage: string,
+): void => {
+  const scheduledStartAt = getScheduledStartDateTime(session);
+  const scheduledEndAt = getScheduledEndDateTime(session);
+
+  if (now < scheduledStartAt) {
+    throw new AppError(earlyMessage, HTTP_STATUS.BAD_REQUEST, {
+      scheduledStartTime: session.scheduledStartTime,
+      scheduledDate: getDatePortion(session.scheduledDate),
+    });
+  }
+
+  if (now >= scheduledEndAt) {
+    throw new AppError(lateMessage, HTTP_STATUS.BAD_REQUEST, {
+      scheduledEndTime: session.scheduledEndTime,
+      scheduledDate: getDatePortion(session.scheduledDate),
+    });
+  }
 };
 
 const ensureValidScheduleWindow = (
@@ -539,6 +599,7 @@ export const sessionService = {
       teacherId: unknown;
       classroomId: unknown;
       cameraIds: string[];
+      dayOfWeek: TimetableDayOfWeek;
       startTime: string;
       endTime: string;
       notes?: string | null;
@@ -567,8 +628,31 @@ export const sessionService = {
       }
     }
 
-    const today = getDatePortion(new Date());
+    const now = new Date();
+    const todayDayOfWeek = getCurrentTimetableDayOfWeek(now);
+
+    if (timetableEntry.dayOfWeek !== todayDayOfWeek) {
+      throw new AppError(
+        'This timetable entry can only be started on its scheduled day.',
+        HTTP_STATUS.BAD_REQUEST,
+      );
+    }
+
+    const today = getDatePortion(now);
     const scheduledDate = getDateOnly(today);
+
+    ensureValidScheduleWindow(timetableEntry.startTime, timetableEntry.endTime);
+    assertSessionCanStartWithinWindow(
+      {
+        scheduledDate,
+        scheduledStartTime: timetableEntry.startTime,
+        scheduledEndTime: timetableEntry.endTime,
+      },
+      now,
+      'This session cannot be started before the timetable start time.',
+      'This class has already ended for today and cannot be started.',
+    );
+
     const existingSession = await SessionModel.findOne({
       timetableEntryId,
       scheduledDate: {
@@ -578,19 +662,41 @@ export const sessionService = {
     });
 
     if (existingSession) {
-      if (existingSession.status === SessionStatus.CREATED) {
-        if (!existingSession.actualStartTime) {
-          existingSession.actualStartTime = new Date();
-        }
+      if (ACTIVE_SESSION_STATUSES.includes(existingSession.status)) {
+        await autoCompleteSession(existingSession, {
+          trigger: 'timetable_start',
+          auditContext,
+        });
+      }
 
+      if (
+        existingSession.status === SessionStatus.COMPLETED ||
+        existingSession.status === SessionStatus.ARCHIVED
+      ) {
+        throw new AppError(
+          'A session for this timetable entry has already been completed today and cannot be started again.',
+          HTTP_STATUS.CONFLICT,
+        );
+      }
+
+      if (existingSession.status === SessionStatus.CREATED) {
+        await assertNoConcurrentActiveSession(
+          {
+            classroomId: existingSession.classroomId,
+            cameraIds: existingSession.cameraIds,
+          },
+          existingSession.id,
+        );
+
+        if (!existingSession.actualStartTime) {
+          existingSession.actualStartTime = now;
+        }
         existingSession.status = SessionStatus.STARTED;
         await existingSession.save();
       }
 
       return existingSession.toJSON();
     }
-
-    ensureValidScheduleWindow(timetableEntry.startTime, timetableEntry.endTime);
 
     const references = await getReferenceBundle({
       classGroupId: String(timetableEntry.classGroupId),
@@ -620,7 +726,7 @@ export const sessionService = {
       scheduledDate,
       scheduledStartTime: timetableEntry.startTime,
       scheduledEndTime: timetableEntry.endTime,
-      actualStartTime: new Date(),
+      actualStartTime: now,
       graceMinutesForLate: DEFAULT_TIMETABLE_SESSION_THRESHOLDS.graceMinutesForLate,
       minimumPresenceMinutes:
         DEFAULT_TIMETABLE_SESSION_THRESHOLDS.minimumPresenceMinutes,
@@ -755,6 +861,13 @@ export const sessionService = {
 
     await assertTeacherCanManageSession(session.teacherId, currentUser);
 
+    if (ACTIVE_SESSION_STATUSES.includes(session.status)) {
+      await autoCompleteSession(session, {
+        trigger: 'manual_start',
+        auditContext,
+      });
+    }
+
     if (session.status === SessionStatus.COMPLETED) {
       throw new AppError(
         'Completed sessions cannot be started again.',
@@ -769,12 +882,27 @@ export const sessionService = {
       );
     }
 
-    if (session.status === SessionStatus.ACTIVE) {
+    if (
+      session.status === SessionStatus.STARTED ||
+      session.status === SessionStatus.ACTIVE
+    ) {
       throw new AppError(
-        'Session is already active.',
+        'Session is already started.',
         HTTP_STATUS.CONFLICT,
       );
     }
+
+    const now = new Date();
+    assertSessionCanStartWithinWindow(
+      {
+        scheduledDate: session.scheduledDate,
+        scheduledStartTime: session.scheduledStartTime,
+        scheduledEndTime: session.scheduledEndTime,
+      },
+      now,
+      'This session cannot be started before its scheduled start time.',
+      'This session has already passed its end time and cannot be started.',
+    );
 
     await assertNoConcurrentActiveSession(
       {
@@ -784,18 +912,11 @@ export const sessionService = {
       session.id,
     );
 
-    const now = new Date();
-    const scheduledStartAt = getScheduledDateTime(
-      session.scheduledDate,
-      session.scheduledStartTime,
-    );
-
     if (!session.actualStartTime) {
       session.actualStartTime = now;
     }
 
-    session.status =
-      now >= scheduledStartAt ? SessionStatus.ACTIVE : SessionStatus.STARTED;
+    session.status = SessionStatus.STARTED;
 
     await session.save();
     await auditService.logAction({
@@ -886,6 +1007,13 @@ export const sessionService = {
     ) {
       throw new AppError(
         'Started or active sessions must be completed before archive.',
+        HTTP_STATUS.BAD_REQUEST,
+      );
+    }
+
+    if (session.status === SessionStatus.CREATED) {
+      throw new AppError(
+        'Only completed sessions can be archived.',
         HTTP_STATUS.BAD_REQUEST,
       );
     }

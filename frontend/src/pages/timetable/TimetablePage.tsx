@@ -26,6 +26,7 @@ import TextAreaField from '../../components/forms/TextAreaField'
 import DataTable, { type DataTableColumn } from '../../components/tables/DataTable'
 import TableActions from '../../components/tables/TableActions'
 import { routes } from '../../constants/routes'
+import type { Session } from '../../types/session'
 import type {
   CreateTimetableEntryInput,
   TimetableDayOfWeek,
@@ -33,12 +34,126 @@ import type {
   UpdateTimetableEntryInput,
 } from '../../types/timetable'
 import { timetableDayValues } from '../../types/timetable'
-import { formatTimeRange, getErrorMessage } from '../../utils/format'
+import { formatTime, formatTimeRange, getErrorMessage } from '../../utils/format'
+
+const weekdayLabels: TimetableDayOfWeek[] = [
+  'sunday',
+  'monday',
+  'tuesday',
+  'wednesday',
+  'thursday',
+  'friday',
+  'saturday',
+]
+
+type TimetableRuntimeState =
+  | 'scheduled'
+  | 'inactive'
+  | 'upcoming'
+  | 'ready_to_start'
+  | 'running'
+  | 'completed'
+  | 'cancelled'
+  | 'missed'
 
 const dayOptions = timetableDayValues.map((day) => ({
   value: day,
   label: day.charAt(0).toUpperCase() + day.slice(1),
 }))
+
+const getTodayDate = (date = new Date()) => {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+
+  return `${year}-${month}-${day}`
+}
+
+const getTodayDayOfWeek = (date = new Date()): TimetableDayOfWeek => weekdayLabels[date.getDay()]
+
+const getTimeValueInMinutes = (value: string) => {
+  const [hours = '0', minutes = '0'] = value.split(':')
+  return Number(hours) * 60 + Number(minutes)
+}
+
+const getTimetableRuntimeState = (
+  entry: TimetableEntry,
+  linkedSession: Session | null,
+  todayDay: TimetableDayOfWeek,
+  nowMinutes: number,
+): TimetableRuntimeState => {
+  if (linkedSession) {
+    if (linkedSession.status === 'active' || linkedSession.status === 'started') {
+      return 'running'
+    }
+
+    if (linkedSession.status === 'completed' || linkedSession.status === 'archived') {
+      return 'completed'
+    }
+  }
+
+  if (!entry.isActive) {
+    return entry.dayOfWeek === todayDay ? 'cancelled' : 'inactive'
+  }
+
+  if (entry.dayOfWeek !== todayDay) {
+    return 'scheduled'
+  }
+
+  const startMinutes = getTimeValueInMinutes(entry.startTime)
+  const endMinutes = getTimeValueInMinutes(entry.endTime)
+
+  if (nowMinutes < startMinutes) {
+    return 'upcoming'
+  }
+
+  if (nowMinutes >= endMinutes) {
+    return 'missed'
+  }
+
+  return 'ready_to_start'
+}
+
+const timetableRuntimeStateMeta: Record<
+  TimetableRuntimeState,
+  {
+    label: string
+    tone: 'neutral' | 'brand' | 'success' | 'warning' | 'danger'
+  }
+> = {
+  scheduled: {
+    label: 'Active',
+    tone: 'success',
+  },
+  inactive: {
+    label: 'Inactive',
+    tone: 'warning',
+  },
+  upcoming: {
+    label: 'Upcoming',
+    tone: 'neutral',
+  },
+  ready_to_start: {
+    label: 'Ready to Start',
+    tone: 'brand',
+  },
+  running: {
+    label: 'Running',
+    tone: 'brand',
+  },
+  completed: {
+    label: 'Completed',
+    tone: 'success',
+  },
+  cancelled: {
+    label: 'Cancelled',
+    tone: 'warning',
+  },
+  missed: {
+    label: 'Missed',
+    tone: 'danger',
+  },
+}
 
 const timetableSchema = z
   .object({
@@ -228,6 +343,7 @@ function TimetableEntryForm({
 function TimetablePage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const [now, setNow] = useState(() => new Date())
   const [dayFilter, setDayFilter] = useState<TimetableDayOfWeek | ''>('')
   const [classGroupFilter, setClassGroupFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState<'active' | 'inactive' | ''>('')
@@ -241,6 +357,18 @@ function TimetablePage() {
     nextActive: boolean
   } | null>(null)
 
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setNow(new Date())
+    }, 60_000)
+
+    return () => window.clearInterval(intervalId)
+  }, [])
+
+  const today = useMemo(() => getTodayDate(now), [now])
+  const todayDay = useMemo(() => getTodayDayOfWeek(now), [now])
+  const nowMinutes = useMemo(() => now.getHours() * 60 + now.getMinutes(), [now])
+
   const timetableQuery = useQuery({
     queryKey: ['timetable', dayFilter, classGroupFilter, statusFilter],
     queryFn: () =>
@@ -253,6 +381,17 @@ function TimetablePage() {
           statusFilter === ''
             ? undefined
             : statusFilter === 'active',
+      }),
+  })
+
+  const sessionsQuery = useQuery({
+    queryKey: ['sessions', 'timetable-runtime', today],
+    refetchInterval: 60_000,
+    queryFn: () =>
+      sessionsApi.listSessions({
+        page: 1,
+        limit: 100,
+        scheduledDate: today,
       }),
   })
 
@@ -387,6 +526,9 @@ function TimetablePage() {
       teacherUsersQuery.isError
         ? getErrorMessage(teacherUsersQuery.error, 'Unable to load teacher users.')
         : null,
+      sessionsQuery.isError
+        ? getErrorMessage(sessionsQuery.error, "Unable to load today's session state.")
+        : null,
       classroomsQuery.isError
         ? getErrorMessage(classroomsQuery.error, 'Unable to load classrooms.')
         : null,
@@ -400,6 +542,8 @@ function TimetablePage() {
     classroomsQuery.isError,
     subjectsQuery.error,
     subjectsQuery.isError,
+    sessionsQuery.error,
+    sessionsQuery.isError,
     teacherProfilesQuery.error,
     teacherProfilesQuery.isError,
     teacherUsersQuery.error,
@@ -476,6 +620,16 @@ function TimetablePage() {
   const totalEntries =
     timetableQuery.data?.meta.totalItems ?? timetableQuery.data?.items.length ?? 0
 
+  const sessionsByTimetableId = useMemo(
+    () =>
+      new Map(
+        (sessionsQuery.data?.items ?? [])
+          .filter((session) => session.timetableEntryId)
+          .map((session) => [session.timetableEntryId!, session] as const),
+      ),
+    [sessionsQuery.data?.items],
+  )
+
   const columns = useMemo<DataTableColumn<TimetableEntry>[]>(
     () => [
       {
@@ -528,67 +682,116 @@ function TimetablePage() {
       {
         key: 'status',
         header: 'Status',
-        render: (entry) => (
-          <StatusBadge
-            label={entry.isActive ? 'Active' : 'Inactive'}
-            tone={entry.isActive ? 'success' : 'warning'}
-          />
-        ),
+        render: (entry) => {
+          const state = getTimetableRuntimeState(
+            entry,
+            sessionsByTimetableId.get(entry.id) ?? null,
+            todayDay,
+            nowMinutes,
+          )
+          const meta = timetableRuntimeStateMeta[state]
+
+          return <StatusBadge label={meta.label} tone={meta.tone} />
+        },
       },
       {
         key: 'actions',
         header: 'Actions',
         className: 'w-64',
         headerClassName: 'text-right',
-        render: (entry) => (
-          <div className="flex items-center justify-end gap-2">
-            {entry.isActive ? (
+        render: (entry) => {
+          const linkedSession = sessionsByTimetableId.get(entry.id) ?? null
+          const state = getTimetableRuntimeState(entry, linkedSession, todayDay, nowMinutes)
+
+          return (
+            <div className="flex items-center justify-end gap-2">
+              {state === 'running' && linkedSession ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    navigate(routes.sessionDetails.replace(':sessionId', linkedSession.id))
+                  }
+                  className="inline-flex h-9 items-center rounded-xl border border-slate-200 px-3 text-xs font-semibold uppercase tracking-[0.16em] text-ink-600 transition hover:border-brand-200 hover:bg-brand-50 hover:text-brand-700"
+                >
+                  Open
+                </button>
+              ) : null}
+
+              {state === 'completed' && linkedSession ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    navigate(routes.sessionDetails.replace(':sessionId', linkedSession.id))
+                  }
+                  className="inline-flex h-9 items-center rounded-xl border border-slate-200 px-3 text-xs font-semibold uppercase tracking-[0.16em] text-ink-600 transition hover:border-brand-200 hover:bg-brand-50 hover:text-brand-700"
+                >
+                  View
+                </button>
+              ) : null}
+
+              {state === 'upcoming' ? (
+                <button
+                  type="button"
+                  disabled
+                  className="inline-flex h-9 items-center rounded-xl border border-slate-200 bg-slate-50 px-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-500"
+                >
+                  Starts {formatTime(entry.startTime)}
+                </button>
+              ) : null}
+
+              {state === 'ready_to_start' ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void startSessionMutation.mutateAsync(entry.id)
+                  }}
+                  disabled={startSessionMutation.isPending && startingEntryId === entry.id}
+                  className="inline-flex h-9 items-center gap-2 rounded-xl border border-brand-200 bg-brand-50 px-3 text-xs font-semibold uppercase tracking-[0.16em] text-brand-700 transition hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <Play className="h-3.5 w-3.5" />
+                  <span>
+                    {startSessionMutation.isPending && startingEntryId === entry.id
+                      ? 'Starting'
+                      : 'Start'}
+                  </span>
+                </button>
+              ) : null}
+
               <button
                 type="button"
-                onClick={() => {
-                  void startSessionMutation.mutateAsync(entry.id)
-                }}
-                disabled={startSessionMutation.isPending && startingEntryId === entry.id}
-                className="inline-flex h-9 items-center gap-2 rounded-xl border border-brand-200 bg-brand-50 px-3 text-xs font-semibold uppercase tracking-[0.16em] text-brand-700 transition hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-60"
+                onClick={() =>
+                  setStatusTarget({
+                    entry,
+                    nextActive: !entry.isActive,
+                  })
+                }
+                className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-ink-600 transition hover:border-brand-200 hover:bg-brand-50 hover:text-brand-700"
               >
-                <Play className="h-3.5 w-3.5" />
-                <span>
-                  {startSessionMutation.isPending && startingEntryId === entry.id
-                    ? 'Starting'
-                    : 'Start'}
-                </span>
+                {entry.isActive ? 'Disable' : 'Enable'}
               </button>
-            ) : null}
-            <button
-              type="button"
-              onClick={() =>
-                setStatusTarget({
-                  entry,
-                  nextActive: !entry.isActive,
-                })
-              }
-              className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-ink-600 transition hover:border-brand-200 hover:bg-brand-50 hover:text-brand-700"
-            >
-              {entry.isActive ? 'Disable' : 'Enable'}
-            </button>
-            <TableActions
-              onEdit={() => {
-                setEditingEntry(entry)
-                setFormError(null)
-                setSheetOpen(true)
-              }}
-            />
-          </div>
-        ),
+              <TableActions
+                onEdit={() => {
+                  setEditingEntry(entry)
+                  setFormError(null)
+                  setSheetOpen(true)
+                }}
+              />
+            </div>
+          )
+        },
       },
     ],
     [
       classGroupLabelMap,
       classroomLabelMap,
+      navigate,
+      nowMinutes,
+      sessionsByTimetableId,
       startSessionMutation,
       startingEntryId,
       subjectLabelMap,
       teacherLabelMap,
+      todayDay,
     ],
   )
 

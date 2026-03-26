@@ -128,6 +128,14 @@ const canArchiveSession = (status: SessionStatus) => status === 'completed'
 const getSessionPath = (sessionId: string) =>
   routes.sessionDetails.replace(':sessionId', sessionId)
 
+const compactFilterClass =
+  'flex h-10 w-full min-w-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 shadow-sm transition focus-within:border-brand-200 focus-within:ring-2 focus-within:ring-brand-100/70'
+
+const compactFilterLabelClass =
+  'text-[10px] font-semibold uppercase tracking-[0.18em] text-ink-400'
+
+const compactFilterInputClass = 'w-full bg-transparent text-xs text-ink-950 outline-none'
+
 interface SessionFormProps {
   session?: Session | null
   classGroupOptions: Array<{ label: string; value: string }>
@@ -548,24 +556,26 @@ function SessionsPage() {
       {
         key: 'session',
         header: 'Session',
+        headerClassName: 'text-[10px]',
         render: (session) => (
           <div className="space-y-1">
-            <p className="font-semibold text-ink-950">
+            <p className="text-sm font-semibold text-ink-950">
               {session.title?.trim() ||
                 subjectLabelMap.get(session.subjectId ?? '') ||
                 'Untitled session'}
             </p>
-            <p className="text-xs text-ink-500">{session.id}</p>
+            <p className="text-[11px] text-ink-500">{session.id}</p>
           </div>
         ),
       },
       {
         key: 'schedule',
         header: 'Schedule',
+        headerClassName: 'text-[10px]',
         render: (session) => (
           <div className="space-y-1">
-            <p>{formatDate(session.scheduledDate)}</p>
-            <p className="text-xs text-ink-500">
+            <p className="text-sm">{formatDate(session.scheduledDate)}</p>
+            <p className="text-[11px] text-ink-500">
               {formatTimeRange(
                 session.scheduledStartTime,
                 session.scheduledEndTime,
@@ -577,10 +587,11 @@ function SessionsPage() {
       {
         key: 'class',
         header: 'Class / Subject',
+        headerClassName: 'text-[10px]',
         render: (session) => (
           <div className="space-y-1">
-            <p>{classGroupLabelMap.get(session.classGroupId ?? '') ?? 'Not linked'}</p>
-            <p className="text-xs text-ink-500">
+            <p className="text-sm">{classGroupLabelMap.get(session.classGroupId ?? '') ?? 'Not linked'}</p>
+            <p className="text-[11px] text-ink-500">
               {subjectLabelMap.get(session.subjectId ?? '') ?? 'Subject not linked'}
             </p>
           </div>
@@ -589,10 +600,11 @@ function SessionsPage() {
       {
         key: 'teacher',
         header: 'Teacher',
+        headerClassName: 'text-[10px]',
         render: (session) => (
           <div className="space-y-1">
-            <p>{teacherLabelMap.get(session.teacherId ?? '') ?? 'Not linked'}</p>
-            <p className="text-xs text-ink-500">
+            <p className="text-sm">{teacherLabelMap.get(session.teacherId ?? '') ?? 'Not linked'}</p>
+            <p className="text-[11px] text-ink-500">
               {classroomLabelMap.get(session.classroomId ?? '') ?? 'Classroom not linked'}
             </p>
           </div>
@@ -601,13 +613,14 @@ function SessionsPage() {
       {
         key: 'status',
         header: 'Status',
+        headerClassName: 'text-[10px]',
         render: (session) => (
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <StatusBadge
               label={session.status.charAt(0).toUpperCase() + session.status.slice(1)}
               tone={statusToneMap[session.status]}
             />
-            <p className="text-xs text-ink-500">
+            <p className="text-[11px] text-ink-500">
               {session.actualStartTime
                 ? `Started ${formatDate(session.actualStartTime)}`
                 : 'Not started yet'}
@@ -618,13 +631,13 @@ function SessionsPage() {
       {
         key: 'actions',
         header: 'Actions',
-        className: 'w-[280px]',
-        headerClassName: 'text-right',
+        className: 'w-[220px]',
+        headerClassName: 'text-right text-[10px]',
         render: (session) => (
           <div className="flex flex-wrap items-center justify-end gap-2">
             <Link
               to={getSessionPath(session.id)}
-              className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-ink-600 transition hover:border-brand-200 hover:bg-brand-50 hover:text-brand-700"
+              className="rounded-md border border-slate-200 px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-600 transition hover:border-brand-200 hover:bg-brand-50 hover:text-brand-700"
             >
               View
             </Link>
@@ -632,7 +645,7 @@ function SessionsPage() {
               <button
                 type="button"
                 onClick={() => setActionTarget({ session, action: 'start' })}
-                className="rounded-xl border border-brand-200 bg-brand-50 px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-brand-700 transition hover:bg-brand-100"
+                className="rounded-md border border-brand-200 bg-brand-50 px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-brand-700 transition hover:bg-brand-100"
               >
                 Start
               </button>
@@ -641,7 +654,7 @@ function SessionsPage() {
               <button
                 type="button"
                 onClick={() => setActionTarget({ session, action: 'complete' })}
-                className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700 transition hover:bg-emerald-100"
+                className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-700 transition hover:bg-emerald-100"
               >
                 Complete
               </button>
@@ -650,7 +663,7 @@ function SessionsPage() {
               <button
                 type="button"
                 onClick={() => setActionTarget({ session, action: 'archive' })}
-                className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-amber-700 transition hover:bg-amber-100"
+                className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-700 transition hover:bg-amber-100"
               >
                 Archive
               </button>
@@ -716,35 +729,49 @@ function SessionsPage() {
       />
 
       {referenceError ? <ErrorMessage message={referenceError} /> : null}
-
-      <div className="flex flex-col gap-3 2xl:flex-row 2xl:items-center">
+      <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between xl:gap-3">
         <SearchInput
-          wrapperClassName="2xl:flex-1"
+          wrapperClassName="h-10 gap-2 rounded-xl px-3 xl:max-w-[340px] xl:flex-1"
+          className="text-xs"
           value={search}
           onChange={(event) => setSearch(event.target.value)}
           onClear={() => setSearch('')}
           placeholder="Search by title or notes"
         />
-        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap 2xl:flex-nowrap 2xl:items-center">
-          <label className="flex h-12 min-w-[155px] items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 shadow-sm transition focus-within:border-brand-200 focus-within:ring-4 focus-within:ring-brand-100/70">
-            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-ink-400">
+        <button
+          type="button"
+          onClick={() => {
+            setEditingSession(null)
+            setFormError(null)
+            setSheetOpen(true)
+          }}
+          className="inline-flex h-10 shrink-0 items-center justify-center gap-2 self-start rounded-xl bg-ink-950 px-3.5 text-xs font-medium whitespace-nowrap text-white transition hover:bg-ink-800"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          Add session
+        </button>
+      </div>
+
+      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,0.95fr)_minmax(0,1.25fr)_minmax(0,1.05fr)_minmax(0,1.05fr)]">
+          <label className={compactFilterClass}>
+            <span className={compactFilterLabelClass}>
               Date
             </span>
             <input
               type="date"
               value={dateFilter}
               onChange={(event) => setDateFilter(event.target.value)}
-              className="w-full bg-transparent text-sm text-ink-950 outline-none"
+              className={compactFilterInputClass}
             />
           </label>
-          <label className="flex h-12 min-w-[160px] items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 shadow-sm transition focus-within:border-brand-200 focus-within:ring-4 focus-within:ring-brand-100/70">
-            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-ink-400">
+          <label className={compactFilterClass}>
+            <span className={compactFilterLabelClass}>
               Status
             </span>
             <select
               value={statusFilter}
               onChange={(event) => setStatusFilter(event.target.value as SessionStatus | '')}
-              className="w-full bg-transparent text-sm text-ink-950 outline-none"
+              className={compactFilterInputClass}
             >
               {statusOptions.map((option) => (
                 <option key={option.value || 'all'} value={option.value}>
@@ -753,14 +780,14 @@ function SessionsPage() {
               ))}
             </select>
           </label>
-          <label className="flex h-12 min-w-[180px] items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 shadow-sm transition focus-within:border-brand-200 focus-within:ring-4 focus-within:ring-brand-100/70">
-            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-ink-400">
+          <label className={compactFilterClass}>
+            <span className={compactFilterLabelClass}>
               Group
             </span>
             <select
               value={classGroupFilter}
               onChange={(event) => setClassGroupFilter(event.target.value)}
-              className="w-full bg-transparent text-sm text-ink-950 outline-none"
+              className={compactFilterInputClass}
             >
               {[{ value: '', label: 'All class groups' }, ...classGroupOptions].map((option) => (
                 <option key={option.value || 'all'} value={option.value}>
@@ -769,14 +796,14 @@ function SessionsPage() {
               ))}
             </select>
           </label>
-          <label className="flex h-12 min-w-[180px] items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 shadow-sm transition focus-within:border-brand-200 focus-within:ring-4 focus-within:ring-brand-100/70">
-            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-ink-400">
+          <label className={compactFilterClass}>
+            <span className={compactFilterLabelClass}>
               Teacher
             </span>
             <select
               value={teacherFilter}
               onChange={(event) => setTeacherFilter(event.target.value)}
-              className="w-full bg-transparent text-sm text-ink-950 outline-none"
+              className={compactFilterInputClass}
             >
               {[{ value: '', label: 'All teachers' }, ...teacherOptions].map((option) => (
                 <option key={option.value || 'all'} value={option.value}>
@@ -785,14 +812,14 @@ function SessionsPage() {
               ))}
             </select>
           </label>
-          <label className="flex h-12 min-w-[180px] items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 shadow-sm transition focus-within:border-brand-200 focus-within:ring-4 focus-within:ring-brand-100/70">
-            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-ink-400">
+          <label className={compactFilterClass}>
+            <span className={compactFilterLabelClass}>
               Subject
             </span>
             <select
               value={subjectFilter}
               onChange={(event) => setSubjectFilter(event.target.value)}
-              className="w-full bg-transparent text-sm text-ink-950 outline-none"
+              className={compactFilterInputClass}
             >
               {[{ value: '', label: 'All subjects' }, ...subjectOptions].map((option) => (
                 <option key={option.value || 'all'} value={option.value}>
@@ -801,19 +828,6 @@ function SessionsPage() {
               ))}
             </select>
           </label>
-          <button
-            type="button"
-            onClick={() => {
-              setEditingSession(null)
-              setFormError(null)
-              setSheetOpen(true)
-            }}
-            className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-ink-950 px-4 text-sm font-medium whitespace-nowrap text-white transition hover:bg-ink-800"
-          >
-            <Plus className="h-4 w-4" />
-            Add session
-          </button>
-        </div>
       </div>
 
       {sessionsQuery.isError ? (
@@ -827,7 +841,7 @@ function SessionsPage() {
       ) : (
         <>
           <div className="flex items-center justify-between px-1">
-            <p className="text-sm text-ink-500">{totalSessions} sessions</p>
+            <p className="text-xs text-ink-500">{totalSessions} sessions</p>
           </div>
           <DataTable
             data={sessionsQuery.data?.items ?? []}

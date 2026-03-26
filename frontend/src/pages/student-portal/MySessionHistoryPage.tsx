@@ -9,8 +9,6 @@ import ErrorMessage from '../../components/common/ErrorMessage'
 import Loader from '../../components/common/Loader'
 import PageHeader from '../../components/common/PageHeader'
 import StatCard from '../../components/common/StatCard'
-import InputField from '../../components/forms/InputField'
-import SelectField from '../../components/forms/SelectField'
 import DataTable, { type DataTableColumn } from '../../components/tables/DataTable'
 import { routes } from '../../constants/routes'
 import type { AttendanceStatus } from '../../types/attendance'
@@ -30,6 +28,14 @@ const statusOptions = [
     label: status === 'left_early' ? 'Left Early' : status[0].toUpperCase() + status.slice(1),
   })),
 ]
+
+const compactFilterClass =
+  'flex h-10 w-full min-w-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 shadow-sm transition focus-within:border-brand-200 focus-within:ring-2 focus-within:ring-brand-100/70'
+
+const compactFilterLabelClass =
+  'text-[10px] font-semibold uppercase tracking-[0.18em] text-ink-400'
+
+const compactFilterInputClass = 'w-full bg-transparent text-xs text-ink-950 outline-none'
 
 function MySessionHistoryPage() {
   const [statusFilter, setStatusFilter] = useState<AttendanceStatus | ''>('')
@@ -156,25 +162,39 @@ function MySessionHistoryPage() {
         description="Review your personal classroom session timeline and attendance outcomes."
       />
 
-      <div className="grid gap-4 xl:grid-cols-[220px_220px_220px]">
-        <SelectField
-          label="Attendance status"
-          value={statusFilter}
-          options={statusOptions}
-          onChange={(event) => setStatusFilter(event.target.value as AttendanceStatus | '')}
-        />
-        <InputField
-          label="From"
-          type="date"
-          value={fromDate}
-          onChange={(event) => setFromDate(event.target.value)}
-        />
-        <InputField
-          label="To"
-          type="date"
-          value={toDate}
-          onChange={(event) => setToDate(event.target.value)}
-        />
+      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,0.9fr)_minmax(0,0.9fr)]">
+        <label className={compactFilterClass}>
+          <span className={compactFilterLabelClass}>Attendance status</span>
+          <select
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value as AttendanceStatus | '')}
+            className={compactFilterInputClass}
+          >
+            {statusOptions.map((option) => (
+              <option key={option.value || 'all'} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className={compactFilterClass}>
+          <span className={compactFilterLabelClass}>From</span>
+          <input
+            type="date"
+            value={fromDate}
+            onChange={(event) => setFromDate(event.target.value)}
+            className={compactFilterInputClass}
+          />
+        </label>
+        <label className={compactFilterClass}>
+          <span className={compactFilterLabelClass}>To</span>
+          <input
+            type="date"
+            value={toDate}
+            onChange={(event) => setToDate(event.target.value)}
+            className={compactFilterInputClass}
+          />
+        </label>
       </div>
 
       {sessionHistoryQuery.isError ? (
