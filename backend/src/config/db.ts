@@ -1,7 +1,6 @@
 import mongoose from 'mongoose';
 
 import env from './env';
-import logger from './logger';
 
 export const connectDatabase = async (): Promise<void> => {
   mongoose.set('strictQuery', true);
@@ -9,10 +8,10 @@ export const connectDatabase = async (): Promise<void> => {
     autoIndex: env.NODE_ENV !== 'production',
     serverSelectionTimeoutMS: 5000,
   });
-  logger.info('MongoDB connection established.');
+  console.log('INFO | MongoDB connection established.');
 };
 
 export const disconnectDatabase = async (): Promise<void> => {
   await mongoose.disconnect();
-  logger.info('MongoDB connection closed.');
+  console.log('INFO | MongoDB connection closed.');
 };

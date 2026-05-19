@@ -150,7 +150,11 @@ export const classGroupService = {
 
     await assertClassGroupDuplicates(normalizedPayload, id);
 
-    Object.assign(classGroup, normalizedPayload);
+    for (const [key, value] of Object.entries(normalizedPayload)) {
+      if (value !== undefined) {
+        (classGroup as unknown as Record<string, unknown>)[key] = value;
+      }
+    }
     await classGroup.save();
 
     return classGroup.toJSON();

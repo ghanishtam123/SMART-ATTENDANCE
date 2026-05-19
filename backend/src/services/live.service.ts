@@ -11,6 +11,7 @@ import TeacherProfileModel from '../models/TeacherProfile.model';
 import UnknownFaceAlertModel from '../models/UnknownFaceAlert.model';
 import { AuthenticatedUser } from '../types/auth.types';
 import { AppError } from '../utils/AppError';
+import { attendanceService } from './attendance.service';
 import { sessionService } from './session.service';
 
 interface ActiveSessionsQuery {
@@ -94,6 +95,12 @@ export const liveService = {
       return [];
     }
 
+    await Promise.all(
+      sessions.map((session) =>
+        attendanceService.ensureLiveSessionAttendanceRecords(session.id),
+      ),
+    );
+
     const sessionIds = sessions.map((session) => session._id);
     const [eventCounts, alertCounts, recordCounts] = await Promise.all([
       AttendanceEventModel.aggregate<{ _id: Types.ObjectId; totalEvents: number }>([
@@ -141,6 +148,7 @@ export const liveService = {
 
     const session = await getSessionOrThrow(sessionId);
     await assertTeacherCanAccessSession(session.teacherId, currentUser);
+    await attendanceService.ensureLiveSessionAttendanceRecords(session.id);
 
     const [eventSummary, alertSummary, recordSummary] = await Promise.all([
       AttendanceEventModel.aggregate<{
@@ -270,10 +278,15 @@ export const liveService = {
     const session = await getSessionOrThrow(sessionId);
     await assertTeacherCanAccessSession(session.teacherId, currentUser);
 
+    const limit = Math.min(
+      100,
+      Math.max(1, Number(query.limit ?? 20) || 20),
+    );
+
     return AttendanceEventModel.aggregate([
       { $match: { sessionId: session._id } },
       { $sort: { eventTimestamp: -1, createdAt: -1 } },
-      { $limit: query.limit ?? 20 },
+      { $limit: limit },
       {
         $lookup: {
           from: 'students',
@@ -337,9 +350,14 @@ export const liveService = {
     const session = await getSessionOrThrow(sessionId);
     await assertTeacherCanAccessSession(session.teacherId, currentUser);
 
+    const limit = Math.min(
+      100,
+      Math.max(1, Number(query.limit ?? 20) || 20),
+    );
+
     const alerts = await UnknownFaceAlertModel.find({ sessionId: session._id })
       .sort({ detectedAt: -1, createdAt: -1 })
-      .limit(query.limit ?? 20);
+      .limit(limit);
 
     return alerts.map((alert) => alert.toJSON());
   },

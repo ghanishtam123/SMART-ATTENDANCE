@@ -3,7 +3,10 @@ import { FilterQuery, Types } from 'mongoose';
 import { AttendanceStatus } from '../constants/attendance';
 import { HTTP_STATUS } from '../constants/http';
 import { UserRole } from '../constants/roles';
-import { SessionStatus } from '../constants/session';
+import {
+  ACTIVE_SESSION_STATUSES,
+  SessionStatus,
+} from '../constants/session';
 import { StudentStatus } from '../constants/student';
 import AttendanceEventModel from '../models/AttendanceEvent.model';
 import AttendanceRecordModel, {
@@ -68,6 +71,11 @@ interface AttendanceStatusSummary {
   lateCount: number;
   absentCount: number;
   leftEarlyCount: number;
+}
+
+interface LiveRecognitionEventInput {
+  studentId: string;
+  confidence: number;
 }
 
 const getSessionOrThrow = async (sessionId: string) => {
@@ -150,8 +158,43 @@ const buildScopedSessionFilter = async (
 const getAttendanceStatusSummary = async (
   filter: FilterQuery<AttendanceRecord>,
 ): Promise<AttendanceStatusSummary> => {
+  const aggregateMatch: FilterQuery<AttendanceRecord> = { ...filter };
+
+  const normalizeObjectIdFilter = (
+    field: 'sessionId' | 'studentId',
+  ): void => {
+    const value = aggregateMatch[field];
+
+    if (typeof value === 'string' && Types.ObjectId.isValid(value)) {
+      aggregateMatch[field] = new Types.ObjectId(value) as FilterQuery<AttendanceRecord>[typeof field];
+      return;
+    }
+
+    if (
+      value &&
+      typeof value === 'object' &&
+      '$in' in value &&
+      Array.isArray((value as { $in?: unknown[] }).$in)
+    ) {
+      const converted = (value as { $in: unknown[] }).$in.map((entry) => {
+        if (typeof entry === 'string' && Types.ObjectId.isValid(entry)) {
+          return new Types.ObjectId(entry);
+        }
+        return entry;
+      });
+
+      aggregateMatch[field] = {
+        ...(value as Record<string, unknown>),
+        $in: converted,
+      } as FilterQuery<AttendanceRecord>[typeof field];
+    }
+  };
+
+  normalizeObjectIdFilter('sessionId');
+  normalizeObjectIdFilter('studentId');
+
   const [summary] = await AttendanceRecordModel.aggregate<AttendanceStatusSummary>([
-    { $match: filter },
+    { $match: aggregateMatch },
     {
       $group: {
         _id: null,
@@ -270,6 +313,159 @@ const buildStatusBreakdown = () => ({
   [AttendanceStatus.ABSENT]: 0,
   [AttendanceStatus.LEFT_EARLY]: 0,
 });
+
+const ensureLiveAttendanceRecords = async (
+  session: Awaited<ReturnType<typeof getSessionOrThrow>>,
+): Promise<number> => {
+  if (!ACTIVE_SESSION_STATUSES.includes(session.status)) {
+    return 0;
+  }
+
+  const students = await StudentModel.find({
+    classGroupId: session.classGroupId,
+    status: StudentStatus.ACTIVE,
+  })
+    .select('_id')
+    .lean() as Array<{ _id: Types.ObjectId }>;
+
+  if (students.length === 0) {
+    return 0;
+  }
+
+  const result = await AttendanceRecordModel.bulkWrite(
+    students.map((student) => ({
+      updateOne: {
+        filter: {
+          sessionId: session._id,
+          studentId: student._id,
+        },
+        update: {
+          $setOnInsert: {
+            classGroupId: session.classGroupId,
+            subjectId: session.subjectId,
+            teacherId: session.teacherId,
+            status: AttendanceStatus.ABSENT,
+            firstSeenAt: null,
+            lastSeenAt: null,
+            totalPresenceMinutes: 0,
+            attendancePercentageInSession: 0,
+            confidenceAverage: null,
+            eventCount: 0,
+            remarks: 'Not seen by live camera yet.',
+            finalizedAt: null,
+          },
+        },
+        upsert: true,
+      },
+    })),
+    { ordered: false },
+  );
+
+  return result.upsertedCount;
+};
+
+const syncRecognizedLiveAttendance = async (
+  session: Awaited<ReturnType<typeof getSessionOrThrow>>,
+  events: LiveRecognitionEventInput[],
+): Promise<number> => {
+  if (!ACTIVE_SESSION_STATUSES.includes(session.status) || events.length === 0) {
+    return 0;
+  }
+
+  const rosterStudentIds = await StudentModel.find({
+    classGroupId: session.classGroupId,
+    status: StudentStatus.ACTIVE,
+    _id: {
+      $in: events.map((event) => new Types.ObjectId(event.studentId)),
+    },
+  })
+    .select('_id')
+    .lean() as Array<{ _id: Types.ObjectId }>;
+
+  if (rosterStudentIds.length === 0) {
+    return 0;
+  }
+
+  const sessionStartAt = session.actualStartTime ?? getScheduledDateTime(
+    session.scheduledDate,
+    session.scheduledStartTime,
+  );
+
+  const eventSummaries = await AttendanceEventModel.aggregate<{
+    _id: Types.ObjectId;
+    firstSeenAt: Date;
+    lastSeenAt: Date;
+    confidenceAverage: number;
+    eventCount: number;
+  }>([
+    {
+      $match: {
+        sessionId: session._id,
+        studentId: { $in: rosterStudentIds.map((student) => student._id) },
+        isUnknown: false,
+      },
+    },
+    {
+      $group: {
+        _id: '$studentId',
+        firstSeenAt: { $min: '$eventTimestamp' },
+        lastSeenAt: { $max: '$eventTimestamp' },
+        confidenceAverage: { $avg: '$confidence' },
+        eventCount: { $sum: 1 },
+      },
+    },
+  ]);
+
+  if (eventSummaries.length === 0) {
+    return 0;
+  }
+
+  const operations = eventSummaries.map((summary) => {
+    const firstSeenAt = summary.firstSeenAt;
+    const lastSeenAt = summary.lastSeenAt;
+    const confidenceAverage = roundTo(summary.confidenceAverage);
+    const minutesSinceStart =
+      (firstSeenAt.getTime() - sessionStartAt.getTime()) / 60000;
+    const status =
+      minutesSinceStart > session.graceMinutesForLate
+        ? AttendanceStatus.LATE
+        : AttendanceStatus.PRESENT;
+
+    return {
+      updateOne: {
+        filter: {
+          sessionId: session._id,
+          studentId: summary._id,
+        },
+        update: {
+          $set: {
+            classGroupId: session.classGroupId,
+            subjectId: session.subjectId,
+            teacherId: session.teacherId,
+            status,
+            firstSeenAt,
+            lastSeenAt,
+            confidenceAverage,
+            eventCount: summary.eventCount,
+            remarks: 'Seen by live camera.',
+          },
+          $setOnInsert: {
+            totalPresenceMinutes: 0,
+            attendancePercentageInSession: 0,
+            finalizedAt: null,
+          },
+        },
+        upsert: true,
+      },
+    };
+  });
+
+  const result = await AttendanceRecordModel.bulkWrite(operations, {
+    ordered: false,
+  });
+
+  return result.modifiedCount + result.upsertedCount;
+};
 
 const deriveAttendanceRecords = async (
   sessionId: string,
@@ -415,6 +611,32 @@ const deriveAttendanceRecords = async (
 };
 
 export const attendanceService = {
+  ensureLiveSessionAttendanceRecords: async (
+    sessionId: string,
+  ): Promise<{ sessionId: string; recordsUpserted: number }> => {
+    const session = await getSessionOrThrow(sessionId);
+    const recordsUpserted = await ensureLiveAttendanceRecords(session);
+
+    return {
+      sessionId: session.id,
+      recordsUpserted,
+    };
+  },
+
+  syncLiveRecognitionEvents: async (
+    sessionId: string,
+    events: LiveRecognitionEventInput[],
+  ): Promise<{ sessionId: string; recordsUpdated: number }> => {
+    const session = await getSessionOrThrow(sessionId);
+    await ensureLiveAttendanceRecords(session);
+    const recordsUpdated = await syncRecognizedLiveAttendance(session, events);
+
+    return {
+      sessionId: session.id,
+      recordsUpdated,
+    };
+  },
+
   recalculateCompletedSessionAttendanceForSystem: async (
     sessionId: string,
   ): Promise<AttendanceLifecycleSummary> => {

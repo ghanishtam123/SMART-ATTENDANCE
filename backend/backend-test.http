@@ -13,8 +13,9 @@
 
 @teacherEmail = teacher1@example.com
 @teacherPassword = Teacher@123
+@bootstrapSecret = change-this-bootstrap-secret
 
-@aiApiKey = smart_attendance_ai_key_987654321
+@aiApiKey = change-this-ai-internal-api-key
 
 # =========================
 # HEALTH
@@ -30,6 +31,7 @@ GET {{healthUrl}}
 ### Register Super Admin (use only if bootstrap register is allowed)
 POST {{baseUrl}}/auth/register
 Content-Type: application/json
+x-bootstrap-secret: {{bootstrapSecret}}
 
 {
   "fullName": "Super Admin",
@@ -51,8 +53,8 @@ Content-Type: application/json
 > {%
 const body = response.body || {};
 const data = body.data || body;
-if (data.token) client.global.set("token", data.token);
-if (data.user && data.user._id) client.global.set("superAdminId", data.user._id);
+if (data.accessToken) client.global.set("token", data.accessToken);
+if (data.user && (data.user.id || data.user._id)) client.global.set("superAdminId", data.user.id || data.user._id);
 %}
 
 ### Current User Profile
@@ -91,7 +93,8 @@ Content-Type: application/json
 > {%
 const body = response.body || {};
 const data = body.data || body;
-if (data._id) client.global.set("adminId", data._id);
+const created = data.user || data;
+if (created.id || created._id) client.global.set("adminId", created.id || created._id);
 %}
 
 ### Create Teacher User
@@ -110,7 +113,8 @@ Content-Type: application/json
 > {%
 const body = response.body || {};
 const data = body.data || body;
-if (data._id) client.global.set("teacherUserId", data._id);
+const created = data.user || data;
+if (created.id || created._id) client.global.set("teacherUserId", created.id || created._id);
 %}
 
 ### Get Users List
@@ -140,7 +144,8 @@ Content-Type: application/json
 > {%
 const body = response.body || {};
 const data = body.data || body;
-if (data._id) client.global.set("classGroupId", data._id);
+const created = data.classGroup || data;
+if (created.id || created._id) client.global.set("classGroupId", created.id || created._id);
 %}
 
 ### Get Class Groups
@@ -189,7 +194,7 @@ Content-Type: application/json
   "name": "Smart Room 101",
   "code": "SR101",
   "building": "Main Block",
-  "floor": 1,
+  "floor": "1",
   "capacity": 60,
   "cameraIds": ["cam-01"],
   "isActive": true
@@ -198,7 +203,8 @@ Content-Type: application/json
 > {%
 const body = response.body || {};
 const data = body.data || body;
-if (data._id) client.global.set("classroomId", data._id);
+const created = data.classroom || data;
+if (created.id || created._id) client.global.set("classroomId", created.id || created._id);
 %}
 
 ### Get Classrooms
@@ -241,7 +247,8 @@ Content-Type: application/json
 > {%
 const body = response.body || {};
 const data = body.data || body;
-if (data._id) client.global.set("subjectId", data._id);
+const created = data.subject || data;
+if (created.id || created._id) client.global.set("subjectId", created.id || created._id);
 %}
 
 ### Get Subjects
@@ -283,7 +290,8 @@ Content-Type: application/json
 > {%
 const body = response.body || {};
 const data = body.data || body;
-if (data._id) client.global.set("teacherProfileId", data._id);
+const created = data.teacherProfile || data;
+if (created.id || created._id) client.global.set("teacherProfileId", created.id || created._id);
 %}
 
 ### Get Teachers
@@ -327,7 +335,8 @@ Content-Type: application/json
 > {%
 const body = response.body || {};
 const data = body.data || body;
-if (data._id) client.global.set("studentId1", data._id);
+const created = data.student || data;
+if (created.id || created._id) client.global.set("studentId1", created.id || created._id);
 %}
 
 ### Create Student 2
@@ -350,7 +359,8 @@ Content-Type: application/json
 > {%
 const body = response.body || {};
 const data = body.data || body;
-if (data._id) client.global.set("studentId2", data._id);
+const created = data.student || data;
+if (created.id || created._id) client.global.set("studentId2", created.id || created._id);
 %}
 
 ### Create Student 3
@@ -373,7 +383,8 @@ Content-Type: application/json
 > {%
 const body = response.body || {};
 const data = body.data || body;
-if (data._id) client.global.set("studentId3", data._id);
+const created = data.student || data;
+if (created.id || created._id) client.global.set("studentId3", created.id || created._id);
 %}
 
 ### Get Students
@@ -437,18 +448,18 @@ Content-Type: application/json
   "classroomId": "{{classroomId}}",
   "cameraIds": ["cam-01"],
   "scheduledDate": "2026-03-12",
-  "scheduledStartTime": "2026-03-12T10:00:00.000Z",
-  "scheduledEndTime": "2026-03-12T11:00:00.000Z",
+  "scheduledStartTime": "10:00",
+  "scheduledEndTime": "11:00",
   "graceMinutesForLate": 10,
   "minimumPresenceMinutes": 30,
-  "minimumPresencePercentage": 60,
-  "status": "created"
+  "minimumPresencePercentage": 60
 }
 
 > {%
 const body = response.body || {};
 const data = body.data || body;
-if (data._id) client.global.set("sessionId", data._id);
+const created = data.session || data;
+if (created.id || created._id) client.global.set("sessionId", created.id || created._id);
 %}
 
 ### Get Sessions
@@ -486,7 +497,7 @@ Authorization: Bearer {{token}}
 
 ### Send Known Recognition Events - Batch 1
 POST {{baseUrl}}/ai/recognition-events
-x-ai-api-key: {{aiApiKey}}
+x-api-key: {{aiApiKey}}
 Content-Type: application/json
 
 {
@@ -512,7 +523,7 @@ Content-Type: application/json
 
 ### Send Known Recognition Events - Batch 2
 POST {{baseUrl}}/ai/recognition-events
-x-ai-api-key: {{aiApiKey}}
+x-api-key: {{aiApiKey}}
 Content-Type: application/json
 
 {
@@ -545,7 +556,7 @@ Content-Type: application/json
 
 ### Send Late Student Event
 POST {{baseUrl}}/ai/recognition-events
-x-ai-api-key: {{aiApiKey}}
+x-api-key: {{aiApiKey}}
 Content-Type: application/json
 
 {
@@ -565,7 +576,7 @@ Content-Type: application/json
 ### Send Unknown Face Event
 # @name createUnknownFace
 POST {{baseUrl}}/ai/recognition-events
-x-ai-api-key: {{aiApiKey}}
+x-api-key: {{aiApiKey}}
 Content-Type: application/json
 
 {
@@ -584,7 +595,7 @@ Content-Type: application/json
 
 ### AI Missing sessionId (negative test)
 POST {{baseUrl}}/ai/recognition-events
-x-ai-api-key: {{aiApiKey}}
+x-api-key: {{aiApiKey}}
 Content-Type: application/json
 
 {
@@ -594,7 +605,7 @@ Content-Type: application/json
 
 ### AI Bad Confidence (negative test)
 POST {{baseUrl}}/ai/recognition-events
-x-ai-api-key: {{aiApiKey}}
+x-api-key: {{aiApiKey}}
 Content-Type: application/json
 
 {
@@ -612,7 +623,7 @@ Content-Type: application/json
 
 ### AI Wrong API Key (negative test)
 POST {{baseUrl}}/ai/recognition-events
-x-ai-api-key: WRONG_KEY
+x-api-key: WRONG_KEY
 Content-Type: application/json
 
 {
@@ -641,8 +652,8 @@ Authorization: Bearer {{token}}
 const body = response.body || {};
 const data = body.data || body;
 const items = data.items || data.alerts || data || [];
-if (Array.isArray(items) && items.length > 0 && items[0]._id) {
-  client.global.set("unknownAlertId", items[0]._id);
+if (Array.isArray(items) && items.length > 0 && (items[0].id || items[0]._id)) {
+  client.global.set("unknownAlertId", items[0].id || items[0]._id);
 }
 %}
 

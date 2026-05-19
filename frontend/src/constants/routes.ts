@@ -8,6 +8,7 @@ export const routes = {
   studentDashboard: '/dashboard/student',
   admins: '/admins',
   students: '/students',
+  studentFaceRegistration: '/student-face-registration',
   teachers: '/teachers',
   classGroups: '/class-groups',
   classrooms: '/classrooms',

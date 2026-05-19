@@ -1,4 +1,3 @@
-import logger from '../config/logger';
 import { HTTP_STATUS } from '../constants/http';
 import { SessionStatus } from '../constants/session';
 import AttendanceEventModel from '../models/AttendanceEvent.model';
@@ -7,6 +6,7 @@ import StudentModel from '../models/Student.model';
 import UnknownFaceAlertModel from '../models/UnknownFaceAlert.model';
 import { RecognitionBatchPayload } from '../types/ai.types';
 import { AppError } from '../utils/AppError';
+import { attendanceService } from './attendance.service';
 import { sessionService } from './session.service';
 
 interface IngestionSummary {
@@ -117,18 +117,25 @@ export const aiRecognitionService = {
       );
     }
 
-    logger.info(
-      {
-        sessionId: payload.sessionId,
+    await attendanceService.syncLiveRecognitionEvents(
+      payload.sessionId,
+      payload.events
+        .filter((event) => !event.isUnknown && event.studentId !== null)
+        .map((event) => ({
+          studentId: event.studentId as string,
+          confidence: event.confidence,
+        })),
+    );
+
+    console.log('INFO | AI recognition event batch received.', {
+      sessionId: payload.sessionId,
       cameraId: payload.cameraId,
       totalEvents: payload.events.length,
       recognizedEvents,
       unknownEvents,
       storedAttendanceEvents: payload.events.length,
       createdUnknownFaceAlerts: unknownEvents,
-      },
-      'AI recognition event batch received.',
-    );
+    });
 
     return {
       sessionId: payload.sessionId,

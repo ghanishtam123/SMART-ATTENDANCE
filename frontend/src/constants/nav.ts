@@ -3,6 +3,7 @@ import {
   Bell,
   BookOpen,
   CalendarClock,
+  Camera,
   ClipboardList,
   GraduationCap,
   LayoutDashboard,
@@ -55,6 +56,12 @@ const studentsItem: NavItem = {
   label: 'Students',
   to: routes.students,
   icon: GraduationCap,
+}
+
+const studentFaceRegistrationItem: NavItem = {
+  label: 'Face Registration',
+  to: routes.studentFaceRegistration,
+  icon: Camera,
 }
 
 const teachersItem: NavItem = {
@@ -165,7 +172,7 @@ const superAdminNavigation: NavSection[] = [
   },
   {
     label: 'Management',
-    items: [adminsItem, teachersItem, studentsItem],
+    items: [adminsItem, teachersItem, studentsItem, studentFaceRegistrationItem],
   },
   {
     label: 'Academics',
@@ -184,7 +191,7 @@ const adminNavigation: NavSection[] = [
   },
   {
     label: 'Management',
-    items: [teachersItem, studentsItem],
+    items: [teachersItem, studentsItem, studentFaceRegistrationItem],
   },
   {
     label: 'Academics',

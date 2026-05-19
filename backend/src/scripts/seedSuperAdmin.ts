@@ -3,7 +3,6 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import { connectDatabase, disconnectDatabase } from '../config/db';
-import logger from '../config/logger';
 import { UserRole } from '../constants/roles';
 import UserModel from '../models/User.model';
 
@@ -61,7 +60,7 @@ const run = async (): Promise<void> => {
   const totalUsers = await UserModel.countDocuments();
 
   if (totalUsers > 0) {
-    logger.warn(
+    console.warn(
       'Users already exist in the system. This script will still create an additional super_admin.',
     );
   }
@@ -77,19 +76,16 @@ const run = async (): Promise<void> => {
 
   await user.save();
 
-  logger.info(
-    {
-      userId: user.id,
-      email: user.email,
-      role: user.role,
-    },
-    'Super admin user created successfully.',
-  );
+  console.log('INFO | Super admin user created successfully.', {
+    userId: user.id,
+    email: user.email,
+    role: user.role,
+  });
 };
 
 void run()
   .catch((error: unknown) => {
-    logger.error({ err: error }, 'Failed to seed super admin.');
+    console.error('ERROR | Failed to seed super admin.', { err: error });
     process.exitCode = 1;
   })
   .finally(async () => {

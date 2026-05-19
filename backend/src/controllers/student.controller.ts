@@ -59,10 +59,35 @@ const deleteStudent = asyncHandler(async (req, res) => {
   });
 });
 
+const uploadStudentFaceImages = asyncHandler(async (req, res) => {
+  const result = await studentService.saveStudentFaceImages(
+    String(req.params.id),
+    req.body,
+    buildAuditContext(req),
+  );
+
+  return ApiResponse.success(res, {
+    statusCode: HTTP_STATUS.CREATED,
+    message: 'Student face images saved successfully.',
+    data: result,
+  });
+});
+
+const getStudentFaceImages = asyncHandler(async (req, res) => {
+  const result = await studentService.getStudentFaceImages(String(req.params.id));
+
+  return ApiResponse.success(res, {
+    message: 'Student face images fetched successfully.',
+    data: result,
+  });
+});
+
 export const studentController = {
   listStudents,
   getStudentById,
   createStudent,
   updateStudent,
   deleteStudent,
+  uploadStudentFaceImages,
+  getStudentFaceImages,
 };

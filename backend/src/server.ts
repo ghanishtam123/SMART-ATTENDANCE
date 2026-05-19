@@ -3,13 +3,12 @@ import http from 'node:http';
 import app from './app';
 import { connectDatabase, disconnectDatabase } from './config/db';
 import env from './config/env';
-import logger from './config/logger';
 import { sessionSchedulerService } from './services/sessionScheduler.service';
 
 let server: http.Server | null = null;
 
 const shutdown = async (signal: string): Promise<void> => {
-  logger.info(`Received ${signal}. Shutting down gracefully.`);
+  console.log(`INFO | Received ${signal}. Shutting down gracefully.`);
 
   sessionSchedulerService.stop();
 
@@ -31,24 +30,24 @@ const startServer = async (): Promise<void> => {
   server = http.createServer(app);
 
   server.listen(env.PORT, () => {
-    logger.info(
-      `Smart attendance backend listening on port ${env.PORT} with API prefix ${env.API_PREFIX}.`,
+    console.log(
+      `INFO | Smart attendance backend listening on port ${env.PORT} with API prefix ${env.API_PREFIX}.`,
     );
   });
 
   process.on('SIGINT', () => void shutdown('SIGINT'));
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
   process.on('unhandledRejection', (reason) => {
-    logger.error({ reason }, 'Unhandled promise rejection.');
+    console.error('ERROR | Unhandled promise rejection.', { reason });
     void shutdown('UNHANDLED_REJECTION');
   });
   process.on('uncaughtException', (error) => {
-    logger.fatal({ err: error }, 'Uncaught exception.');
+    console.error('FATAL | Uncaught exception.', { err: error });
     void shutdown('UNCAUGHT_EXCEPTION');
   });
 };
 
 void startServer().catch((error: unknown) => {
-  logger.error({ error }, 'Failed to start the backend server.');
+  console.error('ERROR | Failed to start the backend server.', { error });
   process.exit(1);
 });

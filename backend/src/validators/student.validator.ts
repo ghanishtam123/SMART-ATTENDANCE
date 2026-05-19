@@ -97,3 +97,17 @@ export const studentListQuerySchema = paginationQuerySchema.extend({
   status: z.nativeEnum(StudentStatus).optional(),
   hasEmail: optionalBooleanQuerySchema,
 });
+
+const faceImageDataUrlSchema = z
+  .string()
+  .trim()
+  .regex(
+    /^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/,
+    'Face image must be a base64 JPEG data URL.',
+  );
+
+export const studentFaceImagesBodySchema = z.object({
+  center: faceImageDataUrlSchema,
+  left: faceImageDataUrlSchema,
+  right: faceImageDataUrlSchema,
+});

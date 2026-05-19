@@ -408,7 +408,10 @@ export const faceProfileService = {
     };
   },
 
-  upsertFaceProfile: async (payload: UpsertFaceProfilePayload): Promise<unknown> => {
+  upsertFaceProfile: async (
+    payload: UpsertFaceProfilePayload,
+    auditContext?: RequestAuditContext,
+  ): Promise<unknown> => {
     const existingFaceProfile = await FaceProfileModel.findOne({
       studentId: payload.studentId,
     })
@@ -419,9 +422,10 @@ export const faceProfileService = {
       return faceProfileService.updateFaceProfile(
         String(existingFaceProfile._id),
         payload,
+        auditContext,
       );
     }
 
-    return faceProfileService.createFaceProfile(payload);
+    return faceProfileService.createFaceProfile(payload, auditContext);
   },
 };

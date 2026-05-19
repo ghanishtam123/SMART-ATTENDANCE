@@ -7,6 +7,7 @@ import { authorize } from '../middleware/role.middleware';
 import { validateRequest } from '../middleware/validate.middleware';
 import {
   createStudentSchema,
+  studentFaceImagesBodySchema,
   studentIdParamSchema,
   studentListQuerySchema,
   updateStudentSchema,
@@ -48,6 +49,21 @@ router.delete(
   authorize(UserRole.SUPER_ADMIN, UserRole.ADMIN),
   validateRequest({ params: studentIdParamSchema }),
   studentController.deleteStudent,
+);
+router.post(
+  '/:id/face-images',
+  authorize(UserRole.SUPER_ADMIN, UserRole.ADMIN),
+  validateRequest({
+    params: studentIdParamSchema,
+    body: studentFaceImagesBodySchema,
+  }),
+  studentController.uploadStudentFaceImages,
+);
+router.get(
+  '/:id/face-images',
+  authorize(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.TEACHER),
+  validateRequest({ params: studentIdParamSchema }),
+  studentController.getStudentFaceImages,
 );
 
 export default router;

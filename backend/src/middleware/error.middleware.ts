@@ -1,7 +1,6 @@
 import { NextFunction, Request, Response } from 'express';
 
 import env from '../config/env';
-import logger from '../config/logger';
 import { HTTP_STATUS } from '../constants/http';
 import { ApiResponse } from '../utils/ApiResponse';
 import { AppError } from '../utils/AppError';
@@ -66,14 +65,11 @@ export const errorHandler = (
 ): Response => {
   const normalizedError = normalizeError(error);
 
-  logger.error(
-    {
-      err: error,
-      method: req.method,
-      path: req.originalUrl,
-    },
-    error.message,
-  );
+  console.error(`ERROR | ${error.message}`, {
+    err: error,
+    method: req.method,
+    path: req.originalUrl,
+  });
 
   return ApiResponse.error(res, {
     statusCode: normalizedError.statusCode,

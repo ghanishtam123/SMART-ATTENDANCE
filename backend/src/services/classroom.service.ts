@@ -139,7 +139,11 @@ export const classroomService = {
 
     await assertClassroomDuplicates(normalizedPayload, id);
 
-    Object.assign(classroom, normalizedPayload);
+    for (const [key, value] of Object.entries(normalizedPayload)) {
+      if (value !== undefined) {
+        (classroom as unknown as Record<string, unknown>)[key] = value;
+      }
+    }
     await classroom.save();
 
     return classroom.toJSON();

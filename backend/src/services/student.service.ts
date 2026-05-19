@@ -1,5 +1,9 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+
 import { FilterQuery } from 'mongoose';
 
+import { FaceRegistrationStatus } from '../constants/faceProfile';
 import { HTTP_STATUS } from '../constants/http';
 import { UserRole } from '../constants/roles';
 import { StudentStatus } from '../constants/student';
@@ -14,6 +18,7 @@ import {
   getPaginationOptions,
 } from '../utils/pagination';
 import { auditService } from './audit.service';
+import { faceProfileService } from './faceProfile.service';
 import { createManagedUserAccount } from './userAccount.service';
 
 interface StudentListQuery {
@@ -50,6 +55,60 @@ interface LinkedStudentUser {
   id: string;
   email: string;
 }
+
+interface StudentFaceImagesPayload {
+  center: string;
+  left: string;
+  right: string;
+}
+
+interface StudentFaceImagesResult {
+  studentId: string;
+  storageDir: string;
+  images: {
+    center: string | null;
+    left: string | null;
+    right: string | null;
+  };
+  faceProfileUpdated: boolean;
+  updatedAt: string | null;
+}
+
+const FACE_IMAGE_POSES = ['center', 'left', 'right'] as const;
+const FACE_IMAGE_MAX_BYTES = 1024 * 1024;
+
+const getAiServiceStudentDir = (studentId: string): string =>
+  path.resolve(process.cwd(), '..', 'ai-service', 'data', 'students', studentId);
+
+const decodeJpegDataUrl = (value: string, pose: string): Buffer => {
+  const trimmed = value.trim();
+  const match = trimmed.match(/^data:image\/jpeg;base64,([A-Za-z0-9+/]+={0,2})$/);
+
+  if (!match) {
+    throw new AppError(
+      `Invalid ${pose} face image format.`,
+      HTTP_STATUS.BAD_REQUEST,
+    );
+  }
+
+  const buffer = Buffer.from(match[1], 'base64');
+
+  if (!buffer.length) {
+    throw new AppError(
+      `${pose} face image is empty.`,
+      HTTP_STATUS.BAD_REQUEST,
+    );
+  }
+
+  if (buffer.length > FACE_IMAGE_MAX_BYTES) {
+    throw new AppError(
+      `${pose} face image exceeds 1MB size limit.`,
+      HTTP_STATUS.BAD_REQUEST,
+    );
+  }
+
+  return buffer;
+};
 
 const ensureClassGroupExists = async (classGroupId: string): Promise<void> => {
   const classGroup = await ClassGroupModel.exists({ _id: classGroupId });
@@ -463,5 +522,100 @@ export const studentService = {
     const student = await getStudentOrThrow(id);
     await student.deleteOne();
     return student.toJSON();
+  },
+
+  saveStudentFaceImages: async (
+    id: string,
+    payload: StudentFaceImagesPayload,
+    auditContext?: RequestAuditContext,
+  ): Promise<StudentFaceImagesResult> => {
+    const student = await getStudentOrThrow(id);
+    const storageDir = getAiServiceStudentDir(id);
+    const now = new Date();
+    const imagePayload: Record<(typeof FACE_IMAGE_POSES)[number], string> = {
+      center: payload.center,
+      left: payload.left,
+      right: payload.right,
+    };
+
+    await fs.mkdir(storageDir, { recursive: true });
+
+    await Promise.all(
+      FACE_IMAGE_POSES.map(async (pose) => {
+        const imageBuffer = decodeJpegDataUrl(imagePayload[pose], pose);
+        await fs.writeFile(path.join(storageDir, `${pose}.jpg`), imageBuffer);
+      }),
+    );
+
+    await faceProfileService.upsertFaceProfile(
+      {
+        studentId: id,
+        embeddingVersion: 'manual-v1',
+        embeddingCount: FACE_IMAGE_POSES.length,
+        registrationStatus: FaceRegistrationStatus.REGISTERED,
+        registeredAt: now,
+        lastUpdatedAt: now,
+        notes: 'Registered via student face-images upload.',
+      },
+      auditContext,
+    );
+
+    await auditService.logAction({
+      ...auditContext,
+      action: 'student.face_images.upload',
+      entityType: 'student',
+      entityId: student.id,
+      metadata: {
+        poses: FACE_IMAGE_POSES,
+        storageDir,
+      },
+    });
+
+    return {
+      studentId: student.id,
+      storageDir,
+      images: {
+        center: path.join(storageDir, 'center.jpg'),
+        left: path.join(storageDir, 'left.jpg'),
+        right: path.join(storageDir, 'right.jpg'),
+      },
+      faceProfileUpdated: true,
+      updatedAt: now.toISOString(),
+    };
+  },
+
+  getStudentFaceImages: async (id: string): Promise<StudentFaceImagesResult> => {
+    const student = await getStudentOrThrow(id);
+    const storageDir = getAiServiceStudentDir(id);
+
+    const existing = await Promise.all(
+      FACE_IMAGE_POSES.map(async (pose) => {
+        const absolutePath = path.join(storageDir, `${pose}.jpg`);
+        try {
+          const stats = await fs.stat(absolutePath);
+          return [pose, absolutePath, stats.mtime] as const;
+        } catch {
+          return [pose, null, null] as const;
+        }
+      }),
+    );
+
+    const images = Object.fromEntries(
+      existing.map(([pose, absolutePath]) => [pose, absolutePath]),
+    ) as StudentFaceImagesResult['images'];
+    const hasAnyImage = Boolean(images.center || images.left || images.right);
+    const latestMtime = existing
+      .map(([, , mtime]) => mtime)
+      .filter((mtime): mtime is Date => mtime instanceof Date)
+      .sort((a, b) => b.getTime() - a.getTime())[0];
+    const updatedAt = latestMtime ? latestMtime.toISOString() : null;
+
+    return {
+      studentId: student.id,
+      storageDir,
+      images,
+      faceProfileUpdated: hasAnyImage,
+      updatedAt,
+    };
   },
 };

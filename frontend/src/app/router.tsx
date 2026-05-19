@@ -34,6 +34,7 @@ import MyAttendanceOverviewPage from '../pages/student-portal/MyAttendanceOvervi
 import MyProfilePage from '../pages/student-portal/MyProfilePage'
 import MySessionHistoryPage from '../pages/student-portal/MySessionHistoryPage'
 import MySubjectsPage from '../pages/student-portal/MySubjectsPage'
+import StudentFaceRegistrationPage from '../pages/students/StudentFaceRegistrationPage'
 import StudentsPage from '../pages/students/StudentsPage'
 import SubjectsPage from '../pages/subjects/SubjectsPage'
 import TeachersPage from '../pages/teachers/TeachersPage'
@@ -145,6 +146,10 @@ export function AppRouter() {
             <Route element={<RequireRole allowedRoles={adminRoles} />}>
               <Route path={routes.adminDashboard} element={<AdminDashboardPage />} />
               <Route path={routes.students} element={<StudentsPage />} />
+              <Route
+                path={routes.studentFaceRegistration}
+                element={<StudentFaceRegistrationPage />}
+              />
               <Route path={routes.teachers} element={<TeachersPage />} />
               <Route path={routes.classGroups} element={<ClassGroupsPage />} />
               <Route path={routes.classrooms} element={<ClassroomsPage />} />

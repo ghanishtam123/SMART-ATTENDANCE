@@ -31,7 +31,8 @@ function Sidebar({ isOpen, onClose }: SidebarProps) {
           'fixed inset-0 z-30 bg-ink-950/45 backdrop-blur-sm transition lg:hidden',
           isOpen ? 'opacity-100' : 'pointer-events-none opacity-0',
         )}
-        onClick={onClose}
+        onMouseDown={onClose}
+        onTouchStart={onClose}
       />
       <aside
         className={cn(

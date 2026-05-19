@@ -1,6 +1,5 @@
 import { FilterQuery } from 'mongoose';
 
-import logger from '../config/logger';
 import { HTTP_STATUS } from '../constants/http';
 import {
   ACTIVE_SESSION_STATUSES,
@@ -67,6 +66,12 @@ interface AutoCompleteOverdueSessionsSummary {
   checkedCount: number;
   completedCount: number;
   completedSessionIds: string[];
+}
+
+interface AiActiveSessionResult {
+  sessionId: string;
+  cameraId: string | null;
+  status: SessionStatus;
 }
 
 const DEFAULT_TIMETABLE_SESSION_THRESHOLDS = {
@@ -458,13 +463,13 @@ const autoCompleteSession = async (
       session.id,
     );
   } catch (error) {
-    logger.error(
+    console.error(
+      'ERROR | Failed to recalculate attendance after automatic session completion.',
       {
         err: error,
         sessionId: session.id,
         trigger: options.trigger,
       },
-      'Failed to recalculate attendance after automatic session completion.',
     );
   }
 
@@ -502,13 +507,13 @@ export const sessionService = {
           completedSessionIds.push(session.id);
         }
       } catch (error) {
-        logger.error(
+        console.error(
+          'ERROR | Failed to automatically complete overdue session.',
           {
             err: error,
             sessionId: session.id,
             trigger: options.trigger,
           },
-          'Failed to automatically complete overdue session.',
         );
       }
     }
@@ -517,6 +522,37 @@ export const sessionService = {
       checkedCount: candidates.length,
       completedCount: completedSessionIds.length,
       completedSessionIds,
+    };
+  },
+
+  getActiveSessionForAi: async (
+    cameraId?: string,
+  ): Promise<AiActiveSessionResult | null> => {
+    const normalizedCameraId = cameraId?.trim();
+    const session = (await SessionModel.findOne({
+      status: { $in: ACTIVE_SESSION_STATUSES },
+      ...(normalizedCameraId ? { cameraIds: normalizedCameraId } : {}),
+    })
+      .sort({ actualStartTime: -1, updatedAt: -1, createdAt: -1 })
+      .select('_id cameraIds status')
+      .lean()) as {
+      _id: unknown;
+      cameraIds: string[];
+      status: SessionStatus;
+    } | null;
+
+    if (!session) {
+      return null;
+    }
+
+    const sessionCameraIds = Array.isArray(session.cameraIds)
+      ? session.cameraIds.map((item: string) => String(item))
+      : [];
+
+    return {
+      sessionId: String(session._id),
+      cameraId: normalizedCameraId ?? sessionCameraIds[0] ?? null,
+      status: session.status,
     };
   },
 

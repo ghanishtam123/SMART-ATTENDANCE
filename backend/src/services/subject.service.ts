@@ -191,7 +191,11 @@ export const subjectService = {
       'One or more class group ids are invalid.',
     );
 
-    Object.assign(subject, normalizedPayload);
+    for (const [key, value] of Object.entries(normalizedPayload)) {
+      if (value !== undefined) {
+        (subject as unknown as Record<string, unknown>)[key] = value;
+      }
+    }
     await subject.save();
 
     return subject.toJSON();

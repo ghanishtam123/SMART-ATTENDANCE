@@ -1,4 +1,3 @@
-import logger from '../config/logger';
 import { sessionService } from './session.service';
 
 const SESSION_AUTO_COMPLETE_INTERVAL_MS = 60_000;
@@ -19,19 +18,16 @@ const runOverdueSessionCheck = async (): Promise<void> => {
     });
 
     if (result.completedCount > 0) {
-      logger.info(
-        {
-          checkedCount: result.checkedCount,
-          completedCount: result.completedCount,
-          completedSessionIds: result.completedSessionIds,
-        },
-        'Automatically completed overdue sessions.',
-      );
+      console.log('INFO | Automatically completed overdue sessions.', {
+        checkedCount: result.checkedCount,
+        completedCount: result.completedCount,
+        completedSessionIds: result.completedSessionIds,
+      });
     }
   } catch (error) {
-    logger.error(
+    console.error(
+      'ERROR | Failed while checking for overdue sessions to auto-complete.',
       { err: error },
-      'Failed while checking for overdue sessions to auto-complete.',
     );
   } finally {
     isRunning = false;
@@ -50,12 +46,9 @@ export const sessionSchedulerService = {
 
     intervalHandle.unref?.();
 
-    logger.info(
-      {
-        intervalMs: SESSION_AUTO_COMPLETE_INTERVAL_MS,
-      },
-      'Session auto-complete scheduler started.',
-    );
+    console.log('INFO | Session auto-complete scheduler started.', {
+      intervalMs: SESSION_AUTO_COMPLETE_INTERVAL_MS,
+    });
 
     void runOverdueSessionCheck();
   },

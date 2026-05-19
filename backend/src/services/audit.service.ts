@@ -1,7 +1,6 @@
 import type { Request } from 'express';
 import { Types } from 'mongoose';
 
-import logger from '../config/logger';
 import AuditLogModel from '../models/AuditLog.model';
 
 export interface AuditContext {
@@ -68,15 +67,12 @@ export const auditService = {
         timestamp: input.timestamp ?? new Date(),
       });
     } catch (error) {
-      logger.error(
-        {
-          err: error,
-          action: input.action,
-          entityType: input.entityType,
-          entityId: input.entityId ?? null,
-        },
-        'Failed to persist audit log entry.',
-      );
+      console.error('ERROR | Failed to persist audit log entry.', {
+        err: error,
+        action: input.action,
+        entityType: input.entityType,
+        entityId: input.entityId ?? null,
+      });
     }
   },
 };

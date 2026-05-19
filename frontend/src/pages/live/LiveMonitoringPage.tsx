@@ -7,7 +7,7 @@ import {
   Radar,
   Users,
 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { liveApi } from '../../api/live.api'
 import EmptyState from '../../components/common/EmptyState'
@@ -313,6 +313,8 @@ function LiveMonitoringPage() {
                   </div>
                 </section>
 
+                <SystemCameraPanel sessionId={effectiveSelectedSessionId} />
+
                 <div className="grid gap-6 xl:grid-cols-2">
                   <section className="app-surface p-6">
                     <div className="flex items-center justify-between gap-3">
@@ -392,6 +394,108 @@ function LiveMonitoringPage() {
         </div>
       )}
     </div>
+  )
+}
+
+function SystemCameraPanel({ sessionId }: { sessionId: string }) {
+  const videoRef = useRef<HTMLVideoElement | null>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+  const [cameraEnabled, setCameraEnabled] = useState(false)
+  const [cameraError, setCameraError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!cameraEnabled) {
+      return
+    }
+
+    let mounted = true
+
+    const openCamera = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: {
+            facingMode: 'user',
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+        })
+
+        if (!mounted) {
+          stream.getTracks().forEach((track) => track.stop())
+          return
+        }
+
+        streamRef.current = stream
+
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream
+          await videoRef.current.play()
+        }
+
+        setCameraError(null)
+      } catch {
+        setCameraEnabled(false)
+        setCameraError('Camera permission denied or no system camera found.')
+      }
+    }
+
+    void openCamera()
+
+    return () => {
+      mounted = false
+      streamRef.current?.getTracks().forEach((track) => track.stop())
+      streamRef.current = null
+      if (videoRef.current) {
+        videoRef.current.srcObject = null
+      }
+    }
+  }, [cameraEnabled, sessionId])
+
+  return (
+    <section className="app-surface p-6">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-ink-950">System camera</h2>
+          <p className="mt-1 text-sm text-ink-500">
+            Local camera preview for the selected live session.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            setCameraError(null)
+            setCameraEnabled((value) => !value)
+          }}
+          className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-ink-950 px-4 text-sm font-medium text-white transition hover:bg-ink-800"
+        >
+          <Camera className="h-4 w-4" />
+          {cameraEnabled ? 'Stop camera' : 'Start camera'}
+        </button>
+      </div>
+
+      <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-slate-950">
+        {cameraEnabled ? (
+          <video
+            ref={videoRef}
+            autoPlay
+            muted
+            playsInline
+            className="aspect-video w-full object-cover"
+          />
+        ) : (
+          <div className="flex aspect-video items-center justify-center px-4 text-center text-sm text-white/70">
+            Camera is off.
+          </div>
+        )}
+      </div>
+
+      {cameraError ? (
+        <div className="mt-4">
+          <ErrorMessage message={cameraError} />
+        </div>
+      ) : null}
+    </section>
   )
 }
 

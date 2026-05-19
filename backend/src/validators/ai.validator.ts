@@ -46,3 +46,7 @@ export const recognitionBatchSchema = z.object({
   cameraId: z.string().trim().min(1).max(100),
   events: z.array(recognitionEventSchema).min(1),
 });
+
+export const aiActiveSessionQuerySchema = z.object({
+  cameraId: z.string().trim().min(1).max(100).optional(),
+});

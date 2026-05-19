@@ -75,3 +75,21 @@ export interface UpdateStudentInput {
   status?: StudentStatus
   faceProfileId?: string | null
 }
+
+export interface StudentFaceImagesPayload {
+  center: string
+  left: string
+  right: string
+}
+
+export interface StudentFaceImagesResult {
+  studentId: string
+  storageDir: string
+  images: {
+    center: string | null
+    left: string | null
+    right: string | null
+  }
+  faceProfileUpdated: boolean
+  updatedAt: string | null
+}

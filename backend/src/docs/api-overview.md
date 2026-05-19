@@ -47,6 +47,7 @@
 - `PATCH /api/v1/users/:id/status`
 - `GET|POST /api/v1/students`
 - `GET|PATCH|DELETE /api/v1/students/:id`
+- `GET|POST /api/v1/students/:id/face-images`
 - `GET|POST /api/v1/teachers`
 - `GET|PATCH|DELETE /api/v1/teachers/:id`
 - `GET|POST /api/v1/classrooms`
@@ -177,7 +178,8 @@
 
 ### Security
 
-- Header: `x-api-key: <AI_INTERNAL_API_KEY>`
+- Header: `x-ai-api-key: <AI_INTERNAL_API_KEY>`
+- Backward compatibility: `x-api-key` is also accepted.
 - This endpoint is intended for the internal Python AI service only.
 
 ### Request Body
@@ -242,6 +244,10 @@
 - `FaceProfile` stores face-registration metadata only in this phase.
 - Raw embeddings are intentionally not stored in MongoDB in this version.
 - The Python AI service is assumed to manage actual embedding files or secure external storage.
+- Face registration image upload endpoint:
+  - `POST /api/v1/students/:id/face-images`
+  - body fields: `center`, `left`, `right` (base64 JPEG data URLs)
+  - writes images to `ai-service/data/students/<studentId>/center.jpg|left.jpg|right.jpg`
 
 ## Unknown Face Alerts
 

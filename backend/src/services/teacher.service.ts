@@ -354,7 +354,11 @@ export const teacherService = {
       ...profileUpdates
     } = normalizedPayload;
 
-    Object.assign(teacherProfile, profileUpdates);
+    for (const [key, value] of Object.entries(profileUpdates)) {
+      if (value !== undefined) {
+        (teacherProfile as unknown as Record<string, unknown>)[key] = value;
+      }
+    }
     await teacherProfile.save();
     await auditService.logAction({
       ...auditContext,

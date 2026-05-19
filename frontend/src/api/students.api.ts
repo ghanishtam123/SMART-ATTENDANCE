@@ -3,6 +3,8 @@ import type { ApiResponse, PaginationMeta } from '../types/common'
 import type {
   CreateStudentPayload,
   Student,
+  StudentFaceImagesPayload,
+  StudentFaceImagesResult,
   StudentListQuery,
   UpdateStudentInput,
 } from '../types/student'
@@ -37,6 +39,21 @@ export const studentsApi = {
 
   deleteStudent: async (id: string) => {
     const response = await client.delete<ApiResponse<Student>>(`/students/${id}`)
+    return getApiData(response)
+  },
+
+  uploadFaceImages: async (id: string, payload: StudentFaceImagesPayload) => {
+    const response = await client.post<ApiResponse<StudentFaceImagesResult>>(
+      `/students/${id}/face-images`,
+      payload,
+    )
+    return getApiData(response)
+  },
+
+  getFaceImages: async (id: string) => {
+    const response = await client.get<ApiResponse<StudentFaceImagesResult>>(
+      `/students/${id}/face-images`,
+    )
     return getApiData(response)
   },
 }

@@ -1,14 +1,12 @@
 import morgan from 'morgan';
 
-import env from '../config/env';
-import logger from '../config/logger';
-
 export const requestLogger = morgan(
-  env.NODE_ENV === 'production' ? 'combined' : 'dev',
+  ':method :url :status :response-time ms',
   {
+    skip: (req) => req.url?.startsWith('/health') ?? false,
     stream: {
       write: (message: string) => {
-        logger.info(message.trim());
+        console.log(`INFO | ${message.trim()}`);
       },
     },
   },

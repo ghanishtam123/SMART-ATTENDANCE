@@ -103,9 +103,15 @@ export const authenticateAiService = (
   _res: Response,
   next: NextFunction,
 ): void => {
-  const apiKey = req.headers['x-api-key'];
+  const apiKey =
+    (typeof req.headers['x-ai-api-key'] === 'string'
+      ? req.headers['x-ai-api-key']
+      : undefined) ??
+    (typeof req.headers['x-api-key'] === 'string'
+      ? req.headers['x-api-key']
+      : undefined);
 
-  if (typeof apiKey !== 'string' || apiKey !== env.AI_INTERNAL_API_KEY) {
+  if (apiKey !== env.AI_INTERNAL_API_KEY) {
     next(
       new AppError(
         'Invalid or missing internal AI service API key.',
